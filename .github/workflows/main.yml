@@ -7,7 +7,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
+    
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -19,7 +19,7 @@ jobs:
           script: |
             set -e
 
-            APP_DIR="/opt/myapp2.0"
+            APP_DIR="/home/rootadmin/myapp2.0"
 
             mkdir -p $APP_DIR
 
@@ -28,9 +28,10 @@ jobs:
             fi
 
             cd $APP_DIR
-
-            git fetch origin codex/create-event-booking-platform-application-93n99i
-            git reset --hard origin/codex/create-event-booking-platform-application-93n99i
+            
+            echo "Pull latest code..." 
+            git fetch origin main 
+            git reset --hard origin/main
 
             docker compose down || true
             docker compose up -d --build
