@@ -3,7 +3,7 @@ name: Deploy MyApp (Password Auth)
 on:
   push:
     branches:
-      - main
+      - codex/create-event-booking-platform-application-93n99i
   workflow_dispatch:
 
 jobs:
