@@ -25,7 +25,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Docker Image
-        run: docker build -t myapp:latest .
+        #run: docker build -t myapp:latest .
+        run: docker build --no-cache --progress=plain -t ticketpulse .
 
   deploy:
     name: Stage 3 - Deploy to VM
