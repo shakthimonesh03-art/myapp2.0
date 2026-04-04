@@ -1,4 +1,4 @@
-# TicketPulse MVP (Real-time Ticket Booking Prototype)
+# TicketPulse MVP (Real-time Ticket Booking Prototype).
 
 A working MVP focused on interactive UI + core booking flow:
 - city/category event discovery
