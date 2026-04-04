@@ -3,7 +3,7 @@
 A working MVP focused on interactive UI + core booking flow:
 - city/category event discovery
 - seat selection
-- 5-minute seat hold timer
+- 5-minute seat hold timer.
 - mock payment
 - booking confirmation with generated QR code
 - admin dashboard summary
