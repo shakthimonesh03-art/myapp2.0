@@ -1,8 +1,9 @@
 on:
   push:
     branches:
-      - codex/create-event-booking-platform-application-93n99i
-
+      - main
+  workflow_dispatch:
+  
 jobs:
   deploy:
     runs-on: ubuntu-latest
