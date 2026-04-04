@@ -1,40 +1,14 @@
-name: Deploy MyApp (Password Auth)
-
 on:
   push:
     branches:
       - codex/create-event-booking-platform-application-93n99i
-  workflow_dispatch:
 
 jobs:
-  checkout:
-    name: Stage 1 - Checkout
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-  build:
-    name: Stage 2 - Build Check
-    runs-on: ubuntu-latest
-    needs: checkout
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Build Docker Image
-        #run: docker build -t myapp:latest .
-        run: docker build --no-cache --progress=plain -t ticketpulse .
-
   deploy:
-    name: Stage 3 - Deploy to VM
     runs-on: ubuntu-latest
-    needs: build
 
     steps:
-      - name: Deploy via SSH (Password)
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VM_HOST }}
@@ -46,27 +20,18 @@ jobs:
 
             APP_DIR="/opt/myapp2.0"
 
-            echo "Preparing folder..."
             mkdir -p $APP_DIR
 
             if [ ! -d "$APP_DIR/.git" ]; then
-              echo "Cloning repo..."
               git clone https://github.com/shakthimonesh03-art/myapp2.0.git $APP_DIR
             fi
 
             cd $APP_DIR
 
-            echo "Pull latest code..."
-            git fetch origin main
-            git reset --hard origin/main
+            git fetch origin codex/create-event-booking-platform-application-93n99i
+            git reset --hard origin/codex/create-event-booking-platform-application-93n99i
 
-            echo "Stopping old containers..."
             docker compose down || true
-
-            echo "Starting containers..."
             docker compose up -d --build
 
-            echo "Cleaning images..."
             docker image prune -f
-
-            echo "Deployment done 🚀"
