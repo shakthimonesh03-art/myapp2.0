@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+<<<<<<< HEAD
 import { formatDateTime } from '@/lib/format';
+=======
+>>>>>>> origin/main
 import { events } from '@/lib/mockData';
 
 const LOCATIONS = ['Bengaluru', 'Mumbai', 'Hyderabad', 'New York', 'Dubai'];
@@ -30,6 +33,10 @@ export default function HomePage() {
       <nav className="modern-nav">
         <div className="logo">TicketPulse</div>
         <div className="modern-actions">
+<<<<<<< HEAD
+=======
+          <Link href="/admin" className="top-link">Dashboard</Link>
+>>>>>>> origin/main
           <button onClick={() => setLocationModalOpen(true)} className="location-btn">
             📍 {selectedLocation || 'Select Location'}
           </button>
@@ -60,7 +67,11 @@ export default function HomePage() {
             <article key={event.id} className="modern-card" style={{ animationDelay: `${index * 60}ms` }}>
               <div className="icon-chip">{index + 1}</div>
               <h3>{event.title}</h3>
+<<<<<<< HEAD
               <p>{event.city} • {formatDateTime(event.datetime)}</p>
+=======
+              <p>{event.city} • {new Date(event.datetime).toLocaleString()}</p>
+>>>>>>> origin/main
               <p>{event.venue}</p>
               <p>{event.venueLayout}</p>
               <div className="card-foot">

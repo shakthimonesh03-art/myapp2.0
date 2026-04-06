@@ -219,6 +219,7 @@ a { color: inherit; text-decoration: none; }
   color: #0f172a;
   border-color: #e2e8f0;
 }
+<<<<<<< HEAD
 
 .bookings-dashboard {
   min-height: calc(100vh - 100px);
@@ -274,3 +275,5 @@ a { color: inherit; text-decoration: none; }
   padding: .45rem .8rem;
   cursor: pointer;
 }
+=======
+>>>>>>> origin/main
