@@ -219,3 +219,61 @@ a { color: inherit; text-decoration: none; }
   color: #0f172a;
   border-color: #e2e8f0;
 }
+<<<<<<< HEAD
+
+.bookings-dashboard {
+  min-height: calc(100vh - 100px);
+  background: radial-gradient(circle at top left, rgba(51, 88, 255, 0.22), transparent 32%), linear-gradient(180deg, #060817, #040414);
+  border-radius: 28px;
+  padding: 1.4rem;
+}
+.bookings-header h1 {
+  margin: .3rem 0 1rem;
+  font-size: clamp(1.8rem, 3vw, 2.4rem);
+  font-weight: 800;
+  color: #f8fbff;
+}
+.bookings-list { display: grid; gap: 1rem; }
+.booking-card {
+  background: rgba(14, 19, 43, 0.9);
+  border: 1px solid rgba(123, 141, 255, 0.35);
+  border-radius: 26px;
+  padding: 1.1rem;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, .25);
+  color: #eaf1ff;
+}
+.booking-card h3 { margin-top: 0; margin-bottom: .8rem; font-size: 1.25rem; }
+.status-confirmed { color: #2ddc84; font-weight: 700; }
+.status-cancelled { color: #ff6f6f; font-weight: 700; }
+.booking-cta {
+  width: 100%;
+  margin-top: .5rem;
+  margin-bottom: .6rem;
+  background: linear-gradient(120deg, #3a5eff, #24d7ff);
+  box-shadow: 0 0 0 rgba(36, 215, 255, 0);
+  transition: box-shadow .2s ease;
+}
+.booking-cta:hover { box-shadow: 0 0 20px rgba(36, 215, 255, .35); }
+.asset-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: .45rem;
+  margin: .2rem 0 .7rem;
+}
+.asset-links a {
+  font-size: .85rem;
+  color: #a7d4ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.cancel-link {
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.24);
+  background: transparent;
+  color: #d6defe;
+  padding: .45rem .8rem;
+  cursor: pointer;
+}
+=======
+>>>>>>> origin/main
