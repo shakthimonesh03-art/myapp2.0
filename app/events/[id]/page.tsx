@@ -2,7 +2,14 @@
 
 import { useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+<<<<<<< HEAD
 import { formatDateTime } from '@/lib/format';
+=======
+<<<<<<< HEAD
+import { formatDateTime } from '@/lib/format';
+=======
+>>>>>>> origin/main
+>>>>>>> origin/main
 import { events, seatLayout } from '@/lib/mockData';
 
 const HOLD_MINUTES = 5;
@@ -33,7 +40,15 @@ export default function EventDetailPage() {
     <section className="stack-xl">
       <div className="panel hero-mini">
         <h1>{event.title}</h1>
+<<<<<<< HEAD
         <p>{event.venue} • {event.city} • {formatDateTime(event.datetime)}</p>
+=======
+<<<<<<< HEAD
+        <p>{event.venue} • {event.city} • {formatDateTime(event.datetime)}</p>
+=======
+        <p>{event.venue} • {event.city} • {new Date(event.datetime).toLocaleString()}</p>
+>>>>>>> origin/main
+>>>>>>> origin/main
         <p>{event.venueLayout}</p>
       </div>
 
