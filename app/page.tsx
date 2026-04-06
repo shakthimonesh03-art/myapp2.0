@@ -5,6 +5,10 @@ import Link from 'next/link';
 <<<<<<< HEAD
 import { formatDateTime } from '@/lib/format';
 =======
+<<<<<<< HEAD
+import { formatDateTime } from '@/lib/format';
+=======
+>>>>>>> origin/main
 >>>>>>> origin/main
 import { events } from '@/lib/mockData';
 
@@ -35,7 +39,10 @@ export default function HomePage() {
         <div className="modern-actions">
 <<<<<<< HEAD
 =======
+<<<<<<< HEAD
+=======
           <Link href="/admin" className="top-link">Dashboard</Link>
+>>>>>>> origin/main
 >>>>>>> origin/main
           <button onClick={() => setLocationModalOpen(true)} className="location-btn">
             📍 {selectedLocation || 'Select Location'}
@@ -70,7 +77,11 @@ export default function HomePage() {
 <<<<<<< HEAD
               <p>{event.city} • {formatDateTime(event.datetime)}</p>
 =======
+<<<<<<< HEAD
+              <p>{event.city} • {formatDateTime(event.datetime)}</p>
+=======
               <p>{event.city} • {new Date(event.datetime).toLocaleString()}</p>
+>>>>>>> origin/main
 >>>>>>> origin/main
               <p>{event.venue}</p>
               <p>{event.venueLayout}</p>

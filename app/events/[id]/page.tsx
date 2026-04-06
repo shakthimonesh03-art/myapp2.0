@@ -5,6 +5,10 @@ import { useParams, useRouter } from 'next/navigation';
 <<<<<<< HEAD
 import { formatDateTime } from '@/lib/format';
 =======
+<<<<<<< HEAD
+import { formatDateTime } from '@/lib/format';
+=======
+>>>>>>> origin/main
 >>>>>>> origin/main
 import { events, seatLayout } from '@/lib/mockData';
 
@@ -39,7 +43,11 @@ export default function EventDetailPage() {
 <<<<<<< HEAD
         <p>{event.venue} • {event.city} • {formatDateTime(event.datetime)}</p>
 =======
+<<<<<<< HEAD
+        <p>{event.venue} • {event.city} • {formatDateTime(event.datetime)}</p>
+=======
         <p>{event.venue} • {event.city} • {new Date(event.datetime).toLocaleString()}</p>
+>>>>>>> origin/main
 >>>>>>> origin/main
         <p>{event.venueLayout}</p>
       </div>

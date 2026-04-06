@@ -5,6 +5,10 @@ import { cancelBooking, getBookings } from '@/lib/clientStore';
 <<<<<<< HEAD
 import { formatDateTime } from '@/lib/format';
 =======
+<<<<<<< HEAD
+import { formatDateTime } from '@/lib/format';
+=======
+>>>>>>> origin/main
 >>>>>>> origin/main
 
 export default function MyBookingsPage() {
@@ -21,6 +25,9 @@ export default function MyBookingsPage() {
 
   return (
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> origin/main
     <section className="bookings-dashboard">
       <header className="bookings-header">
         <h1>My Bookings</h1>
@@ -63,6 +70,8 @@ export default function MyBookingsPage() {
               </article>
             );
           })}
+<<<<<<< HEAD
+=======
 =======
     <section className="stack">
       <h1>My bookings</h1>
@@ -90,6 +99,7 @@ export default function MyBookingsPage() {
               )}
             </article>
           ))}
+>>>>>>> origin/main
 >>>>>>> origin/main
         </div>
       )}
