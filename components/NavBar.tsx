@@ -47,7 +47,7 @@ export default function NavBar() {
       <div className="container nav-shell">
         <Link href="/" className="brand">
           TicketPulse
-          <span>Razorpay UPI Ready</span>
+          <span>Book Smarter, Not Harder</span>
         </Link>
         <nav className="navlinks">
           <Link href="/">Events</Link>
