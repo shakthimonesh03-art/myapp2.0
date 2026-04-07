@@ -82,7 +82,7 @@ export default function HomePage() {
           </select>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="input" />
         </div>
-        <br>
+        <br></br>
         <div className="modern-grid">
           {filtered.map((event, index) => (
             <article key={event.id} className="modern-card" style={{ animationDelay: `${index * 60}ms` }}>
