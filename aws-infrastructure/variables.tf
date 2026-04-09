@@ -43,5 +43,7 @@ variable "sqs_message_retention_seconds" {
 variable "iam_user_name" {
   description = "IAM user for application notification access"
   type        = string
-  default     = "app-cred-01"
+  default     = "app-cred-1"
 }
+
+
