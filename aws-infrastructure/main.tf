@@ -77,7 +77,7 @@ resource "aws_iam_user_policy" "app_notifier" {
         Sid      = "AllowPublishToNotificationTopic"
         Effect   = "Allow"
         Action   = ["sns:Publish"]
-        Resource = aws_sns_topic.notifications.arn
+        Resource = "*"
       },
       {
         Sid      = "AllowConsumeFromNotificationQueue"
