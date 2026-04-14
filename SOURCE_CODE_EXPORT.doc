@@ -1,0 +1,4901 @@
+MyApp2.0 Complete Source Code Export
+Generated on 2026-04-14 (UTC)
+
+============================================================
+FILE: .env.example
+============================================================
+# Copy this file to `.env` before running docker compose
+# and fill with your real AWS values.
+
+AWS_ACCESS_KEY_ID=replace_me
+AWS_SECRET_ACCESS_KEY=replace_me
+AWS_REGION=ap-south-1
+SNS_TOPIC_ARN=arn:aws:sns:ap-south-1:478122456633:Ticketpulse
+SQS_QUEUE_URL=https://sqs.ap-south-1.amazonaws.com/478122456633/myqueus
+
+
+============================================================
+FILE: Dockerfile
+============================================================
+FROM node:20-alpine AS base
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json package-lock.json* ./
+RUN npm install
+
+FROM base AS dev
+ENV NODE_ENV=development
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+EXPOSE 3000
+CMD ["npm", "run", "dev", "--", "-H", "0.0.0.0", "-p", "3000"]
+
+FROM base AS builder
+ENV NODE_ENV=production
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+FROM base AS runner
+ENV NODE_ENV=production
+COPY package.json ./
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/node_modules ./node_modules
+EXPOSE 3000
+CMD ["npm", "run", "start", "--", "-p", "3000"]
+
+
+============================================================
+FILE: README.md
+============================================================
+# TicketPulse MVP (Real-time Ticket Booking Prototype)
+
+Interactive MVP of an event ticket platform covering customer + admin journeys.
+
+## UI
+- Modern modal-driven homepage with location selector
+- Same modern curvy-box visual style applied to booking, notifications (alerts), and admin pages
+- Razorpay UPI style checkout experience in booking flow with S3 upload call for QR SVG + ticket PDF
+
+## Core services implemented (mock microservices)
+- API Gateway: `/api/gateway/{service}/...`
+  - service routing
+  - bearer token validation for protected services
+  - rate limiting / throttling
+  - request logging
+  - CORS headers
+  - API version check (`v1`)
+- Auth Service: `/api/auth`
+  - signup, login, refresh token, forgot-password
+  - RBAC role field support (`customer`, `event organizer`, `admin`, `support`)
+  - mock password hashing helper
+- User Service: `/api/user`
+  - profile, booking history, preferences/city
+- Event Service: `/api/events`
+  - create, update, publish/unpublish
+  - event metadata fields
+- Venue Service: `/api/venues`
+  - venue create/list and seat-layout retrieval
+- Inventory Service: `/api/inventory`
+  - seat states (`AVAILABLE`, `HELD`, `BOOKED`, `BLOCKED`)
+  - hold / release / block / book
+- Booking Service: `/api/bookings`
+  - create, status updates, cancellation/refund-initiation
+  - booking status lifecycle fields
+- Payment Service: `/api/payments`
+  - Razorpay-style idempotent payment processing
+- Notification Service: `/api/notifications`
+  - typed notifications payload records
+- Search Service: `/api/search`
+  - search by city/date/category/query with price range filters
+- Admin Service: `/api/admin`
+  - venue/event creation, coupons, refunds, sales monitor view
+- Reporting Service: `/api/reporting`
+  - booking/revenue/occupancy/top-events/failed-payment/refund reports
+- Storage helper: `/api/storage`
+
+## Data model (mock)
+In-memory structures include Users, Events, Venues, Seats, Bookings, Payments, Notifications, Refunds, Coupons with fields aligned to the requested design.
+
+## S3 storage configuration
+Asset path helper support for:
+- ticket PDFs
+- QR images
+- event banners
+- invoices
+- logs archive
+
+Set env vars (or rely on defaults):
+```bash
+AWS_REGION=ap-south-1
+S3_BUCKET_NAME=mohan12324234
+S3_PREFIX_TICKETS=tickets
+S3_PREFIX_QR=qr
+S3_PREFIX_BANNERS=banners
+S3_PREFIX_INVOICES=invoices
+S3_PREFIX_LOGS=logs
+```
+
+## Secrets and environment variables (recommended)
+- Do **not** commit real credentials in `.env`.
+- Use `.env.example` only as a template of required keys.
+- For GitHub-based deployments, store sensitive values in:
+  - **Settings → Secrets and variables → Actions** (for GitHub Actions)
+  - **Settings → Secrets and variables → Dependabot/Codespaces** when relevant
+- Suggested repository secrets for this project:
+  - `AWS_ACCESS_KEY_ID`
+  - `AWS_SECRET_ACCESS_KEY`
+  - `AWS_REGION`
+  - `SNS_TOPIC_ARN`
+  - `SQS_QUEUE_URL`
+
+If you run with Docker Compose locally, create a private `.env` file in the repo root (ignored by git) and set those values there.
+
+## Run locally
+```bash
+npm install
+npm run dev
+```
+Open `http://localhost:3000`.
+
+## Run with Docker Compose
+```bash
+docker compose up --build
+```
+Open `http://localhost:3000`.
+
+Stop containers:
+```bash
+docker compose down
+```
+
+
+## Access control note
+- Admin navigation/menu appears only for users with `role=admin`.
+- Non-admin users are blocked from viewing admin dashboard page.
+
+
+============================================================
+FILE: app/admin/bookings/page.tsx
+============================================================
+import { BookingComponent } from '@/components/admin/Booking';
+
+export default function BookingListPage() {
+  return <BookingComponent />;
+}
+
+
+============================================================
+FILE: app/admin/events/page.tsx
+============================================================
+import { EventComponent } from '@/components/admin/Event';
+
+export default function EventManagementPage() {
+  return <EventComponent />;
+}
+
+
+============================================================
+FILE: app/admin/layout.tsx
+============================================================
+'use client';
+
+import { ReactNode, useEffect, useState } from 'react';
+import { getActiveUser } from '@/lib/clientStore';
+import { Sidebar } from '@/components/admin/Sidebar';
+import { Header } from '@/components/admin/Header';
+
+export default function AdminLayout({ children }: { children: ReactNode }) {
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    const user = getActiveUser();
+    setIsAdmin(user?.role === 'admin');
+  }, []);
+
+  if (!isAdmin) {
+    return (
+      <section className="modern-page stack-xl">
+        <header className="modern-header">
+          <h1>Access denied</h1>
+          <p>Admin pages are visible only to admin users.</p>
+        </header>
+      </section>
+    );
+  }
+
+  return (
+    <section className="admin-shell">
+      <Sidebar />
+      <div className="admin-main">
+        <Header />
+        {children}
+      </div>
+    </section>
+  );
+}
+
+
+============================================================
+FILE: app/admin/page.tsx
+============================================================
+import { Dashboard } from '@/components/admin/Dashboard';
+
+export default function AdminDashboardPage() {
+  return <Dashboard />;
+}
+
+
+============================================================
+FILE: app/admin/pages/page.tsx
+============================================================
+import { AdminPagesComponent } from '@/components/admin/AdminPages';
+
+export default function AdminPagesPage() {
+  return <AdminPagesComponent />;
+}
+
+
+============================================================
+FILE: app/admin/pricing/page.tsx
+============================================================
+import { PricingComponent } from '@/components/admin/Pricing';
+
+export default function PricingConfigurationPage() {
+  return <PricingComponent />;
+}
+
+
+============================================================
+FILE: app/admin/refunds/page.tsx
+============================================================
+import { RefundComponent } from '@/components/admin/Refund';
+
+export default function RefundPanelPage() {
+  return <RefundComponent />;
+}
+
+
+============================================================
+FILE: app/admin/reports/page.tsx
+============================================================
+import { ReportsComponent } from '@/components/admin/Reports';
+
+export default function ReportsDashboardPage() {
+  return <ReportsComponent />;
+}
+
+
+============================================================
+FILE: app/admin/venues/page.tsx
+============================================================
+import { VenueComponent } from '@/components/admin/Venue';
+
+export default function VenueManagementPage() {
+  return <VenueComponent />;
+}
+
+
+============================================================
+FILE: app/api/admin/events/[id]/route.ts
+============================================================
+import { POST as eventsPost } from '@/app/api/events/route';
+
+export async function PUT(req: Request, { params }: { params: { id: string } }) {
+  const body = await req.json();
+  return eventsPost(new Request(req.url, { method: 'POST', body: JSON.stringify({ action: 'update', eventId: params.id, updates: body }) }));
+}
+
+
+============================================================
+FILE: app/api/admin/events/route.ts
+============================================================
+import { POST as adminPost } from '@/app/api/admin/route';
+export async function POST(req: Request) {
+  const body = await req.json();
+  return adminPost(new Request(req.url, { method: 'POST', body: JSON.stringify({ action: 'create-event', event: body }) }));
+}
+
+
+============================================================
+FILE: app/api/admin/route.ts
+============================================================
+import { createId, json, serviceState } from '@/lib/serviceState';
+import { persistServiceState } from '@/lib/serviceState';
+import { publishSnsNotification } from '@/lib/aws';
+
+export async function GET() {
+  return json({
+    events: serviceState.events.length,
+    venues: serviceState.venues.length,
+    bookings: serviceState.bookings.length,
+    refunds: serviceState.refunds.length,
+    coupons: serviceState.coupons,
+    salesMonitor: serviceState.bookings.slice(0, 10)
+  });
+}
+
+export async function POST(req: Request) {
+  try {
+  const body = await req.json();
+
+  if (body.action === 'create-venue') {
+    const venue = { id: createId('v'), name: body.name, city: body.city, address: body.address || '', capacity: body.capacity || 0, hall: body.hall || 'Main', categories: body.categories || ['Regular'] };
+    serviceState.venues.push(venue);
+    persistServiceState('admin.create-venue', { venueId: venue.id });
+    return json({ venue }, 201);
+  }
+
+  if (body.action === 'create-event') {
+    const event = { id: createId('ev'), ...body.event, status: 'DRAFT' };
+    serviceState.events.push(event);
+    persistServiceState('admin.create-event', { eventId: event.id });
+    return json({ event }, 201);
+  }
+
+  if (body.action === 'coupon') {
+    const coupon = { code: body.code, discountPct: body.discountPct ?? 10, active: true };
+    serviceState.coupons.push(coupon);
+    persistServiceState('admin.coupon', { code: coupon.code });
+    return json({ coupon }, 201);
+  }
+
+  if (body.action === 'refund') {
+    const refund = { id: createId('rfd'), bookingId: body.bookingId, paymentId: body.paymentId, amount: body.amount, status: 'APPROVED' };
+    serviceState.refunds.push(refund);
+    const booking = serviceState.bookings.find((item) => item.id === body.bookingId);
+    if (booking) {
+      await publishSnsNotification({ type: 'refund', userId: booking.userId, message: `Refund processed for booking ${booking.id}`, timestamp: new Date().toISOString() });
+    }
+    persistServiceState('admin.refund', { refundId: refund.id });
+    return json({ refund }, 201);
+  }
+
+  return json({ error: 'Unsupported action' }, 400);
+  } catch (error) {
+    console.error('[admin] POST failed', error);
+    return json({ error: 'Internal error while processing admin action' }, 500);
+  }
+}
+
+
+============================================================
+FILE: app/api/admin/venues/route.ts
+============================================================
+import { POST as adminPost } from '@/app/api/admin/route';
+export async function POST(req: Request) {
+  const body = await req.json();
+  return adminPost(new Request(req.url, { method: 'POST', body: JSON.stringify({ action: 'create-venue', ...body }) }));
+}
+
+
+============================================================
+FILE: app/api/auth/login/route.ts
+============================================================
+import { POST as authPost } from '@/app/api/auth/route';
+export async function POST(req: Request) {
+  const body = await req.json();
+  return authPost(new Request(req.url, { method: 'POST', body: JSON.stringify({ ...body, action: 'login' }) }));
+}
+
+
+============================================================
+FILE: app/api/auth/refresh/route.ts
+============================================================
+import { POST as authPost } from '@/app/api/auth/route';
+export async function POST(req: Request) {
+  return authPost(new Request(req.url, { method: 'POST', body: JSON.stringify({ action: 'refresh' }) }));
+}
+
+
+============================================================
+FILE: app/api/auth/register/route.ts
+============================================================
+import { POST as authPost } from '@/app/api/auth/route';
+export async function POST(req: Request) {
+  const body = await req.json();
+  return authPost(new Request(req.url, { method: 'POST', body: JSON.stringify({ ...body, action: 'signup' }) }));
+}
+
+
+============================================================
+FILE: app/api/auth/route.ts
+============================================================
+import { createId, hashPassword, json, serviceState } from '@/lib/serviceState';
+import { pushOtpAuditToQueue, sendOtpSms } from '@/lib/aws';
+import { clearPhoneOtp, saveOtpForPhone, verifyPhoneOtp } from '@/lib/otpSql';
+
+function normalizePhone(raw: string) {
+  const clean = String(raw || '').replace(/[^\d+]/g, '');
+  if (clean.startsWith('+')) return clean;
+  if (clean.length === 10) return `+91${clean}`;
+  return clean;
+}
+
+export async function OPTIONS() {
+  return json({ ok: true });
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const phone = normalizePhone(body.phone || '');
+    const otp = String(body.otp || '').trim();
+
+    if (body.action === 'admin-demo-login') {
+      let admin = serviceState.users.find((user) => user.role === 'admin');
+      if (!admin) {
+        admin = {
+          id: createId('u'),
+          name: 'Admin User',
+          email: 'admin@ticketpulse.app',
+          phone: '+919999999999',
+          role: 'admin',
+          cityPreference: 'Bengaluru',
+          passwordHash: hashPassword('admin123'),
+          createdAt: Date.now(),
+          otpVerifiedAt: Date.now()
+        };
+        serviceState.users.push(admin);
+      }
+      return json({ user: admin, accessToken: createId('jwt'), refreshToken: createId('refresh') });
+    }
+
+    if (body.action === 'request-otp') {
+      if (!phone || phone.length < 11) return json({ error: 'Valid phone number is required' }, 400);
+      const code = `${Math.floor(100000 + Math.random() * 900000)}`;
+      const expiresAt = Date.now() + 5 * 60 * 1000;
+      saveOtpForPhone(phone, code, expiresAt);
+      const sns = await sendOtpSms(phone, code);
+      if (!sns.sent) {
+        clearPhoneOtp(phone);
+        const reason = sns.code === 'AuthorizationError'
+          ? 'SNS IAM policy issue: current AWS user is not allowed to publish SMS.'
+          : 'OTP delivery failed. Please verify SNS credentials, SMS settings, and phone number format.';
+        return json({
+          error: reason,
+          troubleshooting: [
+            'AWS credentials are missing/invalid',
+            'SNS SMS spending limit or sandbox restrictions',
+            'Phone format not E.164 (example: +919999999999)',
+            'SNS region mismatch vs configured topic/account',
+            'IAM role/user does not allow sns:Publish'
+          ],
+          snsError: sns.error || 'Unknown SNS error',
+          snsErrorCode: sns.code || 'SNSPublishError'
+        }, 502);
+      }
+      await pushOtpAuditToQueue({ type: 'otp_requested', phone, at: Date.now(), snsStatus: sns.sent ? 'SENT' : 'FAILED' });
+      return json({
+        message: 'OTP sent to phone'
+      });
+    }
+
+    if (body.action === 'signup') {
+    if (!phone) return json({ error: 'Phone number is required' }, 400);
+    const otpStatus = verifyPhoneOtp(phone, otp);
+    if (!otpStatus.ok) return json({ error: otpStatus.reason || 'Invalid OTP' }, 401);
+    if (serviceState.users.find((user) => user.phone === phone)) return json({ error: 'Phone already exists' }, 409);
+    const user = {
+      id: createId('u'),
+      name: body.name || 'New User',
+      email: String(body.email || '').trim().toLowerCase(),
+      phone,
+      role: body.role || 'customer',
+      cityPreference: body.cityPreference || '',
+      passwordHash: hashPassword('otp-auth'),
+      createdAt: Date.now(),
+      otpVerifiedAt: Date.now()
+    };
+    serviceState.users.push(user);
+    return json({ user, accessToken: createId('jwt'), refreshToken: createId('refresh') });
+  }
+
+    if (body.action === 'login') {
+    if (!phone) return json({ error: 'Phone number is required' }, 400);
+    const otpStatus = verifyPhoneOtp(phone, otp);
+    if (!otpStatus.ok) return json({ error: otpStatus.reason || 'Invalid OTP' }, 401);
+    let user = serviceState.users.find((item) => item.phone === phone);
+    if (!user) {
+      user = {
+        id: createId('u'),
+        name: 'New User',
+        email: '',
+        phone,
+        role: 'customer',
+        cityPreference: '',
+        passwordHash: hashPassword('otp-auth'),
+        createdAt: Date.now(),
+        otpVerifiedAt: Date.now()
+      };
+      serviceState.users.push(user);
+    }
+    return json({ user, accessToken: createId('jwt'), refreshToken: createId('refresh') });
+  }
+
+    if (body.action === 'refresh') {
+      return json({ accessToken: createId('jwt') });
+    }
+
+    if (body.action === 'forgot-password') {
+      return json({ message: 'Password reset link generated (mock).' });
+    }
+
+    return json({ error: 'Unsupported action' }, 400);
+  } catch (error) {
+    return json({ error: 'Auth service failed', detail: (error as Error).message }, 500);
+  }
+}
+
+
+============================================================
+FILE: app/api/bookings/[id]/cancel/route.ts
+============================================================
+import { POST as bookingsPost } from '@/app/api/bookings/route';
+export async function POST(req: Request, { params }: { params: { id: string } }) {
+  const body = await req.json().catch(() => ({}));
+  return bookingsPost(new Request('http://local/api/bookings', { method: 'POST', body: JSON.stringify({ action: 'cancel', bookingId: params.id, userId: body.userId }) }));
+}
+
+
+============================================================
+FILE: app/api/bookings/[id]/route.ts
+============================================================
+import { json, serviceState } from '@/lib/serviceState';
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+  const { searchParams } = new URL(req.url);
+  const userId = searchParams.get('userId');
+  const booking = serviceState.bookings.find((item) => item.id === params.id);
+  if (!booking) return json({ error: 'Booking not found' }, 404);
+  if (userId && booking.userId !== userId) return json({ error: 'Forbidden' }, 403);
+  return json({ booking });
+}
+
+
+============================================================
+FILE: app/api/bookings/route.ts
+============================================================
+import { createId, json, serviceState } from '@/lib/serviceState';
+import { persistServiceState } from '@/lib/serviceState';
+import { publishKafkaEvent } from '@/lib/kafka';
+import { publishSnsNotification } from '@/lib/aws';
+
+const CANCEL_WINDOW_MS = 5 * 60 * 1000;
+
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const userId = searchParams.get('userId');
+  const admin = searchParams.get('admin') === '1';
+  const bookings = admin ? serviceState.bookings : userId ? serviceState.bookings.filter((booking) => booking.userId === userId) : [];
+  return json({ bookings });
+}
+
+export async function POST(req: Request) {
+  try {
+  const body = await req.json();
+  if (body.action === 'create') {
+    const duplicate = serviceState.bookings.find((item) =>
+      item.userId === body.userId
+      && item.eventId === body.eventId
+      && item.status !== 'CANCELLED'
+      && JSON.stringify([...item.seats].sort()) === JSON.stringify([...(body.seats ?? [])].sort())
+    );
+    if (duplicate) return json({ error: 'Duplicate booking exists for this user and seat selection' }, 409);
+    const booking = { id: createId('bkg'), userId: body.userId, eventId: body.eventId, seats: body.seats, totalAmount: body.totalAmount, status: 'PENDING' as const, createdAt: Date.now() };
+    serviceState.bookings.push(booking);
+    persistServiceState('bookings.create', { bookingId: booking.id });
+    return json({ booking }, 201);
+  }
+  if (body.action === 'status') {
+    const booking = serviceState.bookings.find((item) => item.id === body.bookingId);
+    if (!booking) return json({ error: 'Booking not found' }, 404);
+    booking.status = body.status;
+    persistServiceState('bookings.status', { bookingId: booking.id, status: booking.status });
+    if (body.status === 'CONFIRMED') {
+      await publishKafkaEvent('booking.confirmed', { bookingId: booking.id, payload: booking });
+      await publishSnsNotification({ type: 'booking', userId: booking.userId, message: `Booking confirmed: ${booking.id}`, timestamp: new Date().toISOString() });
+    }
+    return json({ booking });
+  }
+  if (body.action === 'cancel') {
+    const booking = serviceState.bookings.find((item) => item.id === body.bookingId);
+    if (!booking) return json({ error: 'Booking not found' }, 404);
+    if (body.userId && booking.userId !== body.userId) return json({ error: 'Booking does not belong to this user' }, 403);
+    if (Date.now() - booking.createdAt > CANCEL_WINDOW_MS) return json({ error: 'Cancellation allowed only within 5 minutes of booking' }, 409);
+    booking.status = 'CANCELLED';
+    serviceState.refunds.push({ id: createId('rfd'), bookingId: booking.id, amount: booking.totalAmount, status: 'INITIATED' });
+    persistServiceState('bookings.cancel', { bookingId: booking.id });
+    await publishKafkaEvent('booking.cancelled', { bookingId: booking.id, payload: booking });
+    await publishSnsNotification({
+      type: 'refund',
+      userId: booking.userId,
+      message: `Refund initiated for booking ${booking.id}`,
+      timestamp: new Date().toISOString()
+    });
+    return json({ booking });
+  }
+  return json({ error: 'Unsupported action' }, 400);
+  } catch (error) {
+    console.error('[bookings] POST failed', error);
+    return json({ error: 'Internal error while processing booking' }, 500);
+  }
+}
+
+
+============================================================
+FILE: app/api/events/[id]/route.ts
+============================================================
+import { json, serviceState } from '@/lib/serviceState';
+export async function GET(_: Request, { params }: { params: { id: string } }) {
+  const event = serviceState.events.find((item) => item.id === params.id);
+  return event ? json({ event }) : json({ error: 'Event not found' }, 404);
+}
+
+
+============================================================
+FILE: app/api/events/[id]/seats/route.ts
+============================================================
+import { json, serviceState } from '@/lib/serviceState';
+export async function GET(_: Request, { params }: { params: { id: string } }) {
+  return json({ seats: serviceState.seats[params.id] ?? [] });
+}
+
+
+============================================================
+FILE: app/api/events/route.ts
+============================================================
+import { createId, json, serviceState } from '@/lib/serviceState';
+import { publishKafkaEvent } from '@/lib/kafka';
+import { persistServiceState } from '@/lib/serviceState';
+
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const city = searchParams.get('city');
+  const category = searchParams.get('category');
+  const date = searchParams.get('date');
+  const events = serviceState.events.filter((event) =>
+    (!city || event.city === city)
+    && (!category || event.category === category)
+    && (!date || event.startTime.slice(0, 10) === date)
+  );
+  return json({ events });
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+
+  if (body.action === 'create') {
+    if (body.city && !serviceState.locations.includes(body.city)) serviceState.locations.push(body.city);
+    const event = {
+      id: createId('ev'),
+      title: body.title,
+      description: body.description || '',
+      category: body.category,
+      language: body.language || 'English',
+      bannerUrl: body.bannerUrl || '',
+      startTime: body.startTime,
+      endTime: body.endTime,
+      city: body.city,
+      venueId: body.venueId,
+      status: 'DRAFT',
+      organizerId: body.organizerId || 'org-default',
+      ageRestriction: body.ageRestriction || 'All',
+      cancellationPolicy: body.cancellationPolicy || 'No cancellation'
+    };
+    serviceState.events.push(event);
+    serviceState.users.forEach((user) => {
+      serviceState.notifications.unshift({
+        id: createId('ntf'),
+        userId: user.id,
+        type: 'new_event',
+        status: 'SENT',
+        payload: JSON.stringify({ title: event.title, city: event.city, eventId: event.id, message: `New event added: ${event.title}` }),
+        sentAt: Date.now()
+      });
+    });
+    persistServiceState('events.create', { eventId: event.id });
+    await publishKafkaEvent('event.created', { eventId: event.id, payload: event });
+    return json({ event }, 201);
+  }
+
+  if (body.action === 'update') {
+    const event = serviceState.events.find((item) => item.id === body.eventId);
+    if (!event) return json({ error: 'Event not found' }, 404);
+    if (body.updates?.city && !serviceState.locations.includes(body.updates.city)) serviceState.locations.push(body.updates.city);
+    Object.assign(event, body.updates || {});
+    persistServiceState('events.update', { eventId: event.id });
+    await publishKafkaEvent('event.updated', { eventId: event.id, payload: body.updates || {} });
+    return json({ event });
+  }
+
+  if (body.action === 'publish') {
+    const event = serviceState.events.find((item) => item.id === body.eventId);
+    if (!event) return json({ error: 'Event not found' }, 404);
+    event.status = body.publish ? 'PUBLISHED' : 'UNPUBLISHED';
+    return json({ event });
+  }
+
+  if (body.action === 'delete') {
+    const index = serviceState.events.findIndex((item) => item.id === body.eventId);
+    if (index === -1) return json({ error: 'Event not found' }, 404);
+    const [event] = serviceState.events.splice(index, 1);
+    delete serviceState.seats[event.id];
+    persistServiceState('events.delete', { eventId: event.id });
+    return json({ event, deleted: true });
+  }
+
+  return json({ error: 'Unsupported action' }, 400);
+  } catch (error) {
+    console.error('[events] POST failed', error);
+    return json({ error: 'Internal error while saving event' }, 500);
+  }
+}
+
+
+============================================================
+FILE: app/api/events/search/route.ts
+============================================================
+import { GET as searchGet } from '@/app/api/search/route';
+export { searchGet as GET };
+
+
+============================================================
+FILE: app/api/gateway/[...path]/route.ts
+============================================================
+import { NextRequest } from 'next/server';
+import { gatewayState, json } from '@/lib/serviceState';
+
+const allowedServices = new Set(['auth', 'user', 'events', 'venues', 'inventory', 'bookings', 'payments', 'notifications', 'search', 'admin', 'reporting', 'storage']);
+const protectedServices = new Set(['user', 'bookings', 'payments', 'admin', 'reporting']);
+const serviceBaseUrlByName: Record<string, string | undefined> = {
+  auth: process.env.AUTH_SERVICE_URL,
+  user: process.env.USER_SERVICE_URL,
+  events: process.env.EVENTS_SERVICE_URL,
+  venues: process.env.VENUES_SERVICE_URL,
+  inventory: process.env.INVENTORY_SERVICE_URL,
+  bookings: process.env.BOOKINGS_SERVICE_URL,
+  payments: process.env.PAYMENTS_SERVICE_URL,
+  notifications: process.env.NOTIFICATIONS_SERVICE_URL,
+  search: process.env.SEARCH_SERVICE_URL,
+  admin: process.env.ADMIN_SERVICE_URL,
+  reporting: process.env.REPORTING_SERVICE_URL,
+  storage: process.env.STORAGE_SERVICE_URL
+};
+
+export async function OPTIONS() {
+  return json({ ok: true });
+}
+
+export async function GET(req: NextRequest, { params }: { params: { path: string[] } }) {
+  return proxy(req, params.path, 'GET');
+}
+
+export async function POST(req: NextRequest, { params }: { params: { path: string[] } }) {
+  return proxy(req, params.path, 'POST');
+}
+
+async function proxy(req: NextRequest, path: string[], method: 'GET' | 'POST') {
+  const [service, ...rest] = path;
+  if (!service || !allowedServices.has(service)) return json({ error: 'Unknown service route' }, 404);
+
+  const ip = req.headers.get('x-forwarded-for') || 'local';
+  const limiter = gatewayState.rateLimit.get(ip) || { count: 0, resetAt: Date.now() + 60_000 };
+  if (Date.now() > limiter.resetAt) {
+    limiter.count = 0;
+    limiter.resetAt = Date.now() + 60_000;
+  }
+  limiter.count += 1;
+  gatewayState.rateLimit.set(ip, limiter);
+  if (limiter.count > 120) return json({ error: 'Rate limit exceeded' }, 429);
+
+  const version = req.headers.get('x-api-version') || req.nextUrl.searchParams.get('v') || 'v1';
+  if (version !== 'v1') return json({ error: 'Unsupported API version', supported: 'v1' }, 400);
+
+  if (protectedServices.has(service) && !req.headers.get('authorization')?.startsWith('Bearer ')) {
+    return json({ error: 'Missing bearer token' }, 401);
+  }
+
+  const serviceBase = serviceBaseUrlByName[service] || req.nextUrl.origin;
+  const base = serviceBase.endsWith('/') ? serviceBase.slice(0, -1) : serviceBase;
+  const pathSuffix = rest.length ? `/${rest.join('/')}` : '';
+  const url = new URL(`${base}/api/${service}${pathSuffix}`);
+  req.nextUrl.searchParams.forEach((value, key) => url.searchParams.set(key, value));
+
+  gatewayState.requests.unshift({ path: `/${service}/${rest.join('/')}`, method, ts: Date.now(), ip });
+  gatewayState.requests = gatewayState.requests.slice(0, 500);
+
+  const init: RequestInit = { method, headers: { 'content-type': 'application/json' } };
+  if (method === 'POST') init.body = await req.text();
+
+  const response = await fetch(url, init);
+  const text = await response.text();
+  return new Response(text, { status: response.status, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'X-Api-Version': version } });
+}
+
+
+============================================================
+FILE: app/api/inventory/hold/route.ts
+============================================================
+import { POST as inventoryPost } from '@/app/api/inventory/route';
+export async function POST(req: Request) {
+  const body = await req.json();
+  return inventoryPost(new Request(req.url, { method: 'POST', body: JSON.stringify({ ...body, action: 'hold' }) }));
+}
+
+
+============================================================
+FILE: app/api/inventory/release/route.ts
+============================================================
+import { POST as inventoryPost } from '@/app/api/inventory/route';
+export async function POST(req: Request) {
+  const body = await req.json();
+  return inventoryPost(new Request(req.url, { method: 'POST', body: JSON.stringify({ ...body, action: 'release' }) }));
+}
+
+
+============================================================
+FILE: app/api/inventory/route.ts
+============================================================
+import { createId, json, serviceState } from '@/lib/serviceState';
+
+function releaseExpiredHolds(eventId: string) {
+  const now = Date.now();
+  (serviceState.seats[eventId] ?? []).forEach((seat) => {
+    if (seat.status === 'HELD' && seat.holdExpiry <= now) {
+      seat.status = 'AVAILABLE';
+      seat.holdToken = '';
+      seat.holdExpiry = 0;
+    }
+  });
+}
+
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const eventId = searchParams.get('eventId');
+  if (!eventId || !serviceState.seats[eventId]) return json({ error: 'Invalid eventId' }, 400);
+  releaseExpiredHolds(eventId);
+  return json({ seats: serviceState.seats[eventId] });
+}
+
+export async function POST(req: Request) {
+  const body = await req.json();
+  const seats = serviceState.seats[body.eventId] ?? [];
+  releaseExpiredHolds(body.eventId);
+
+  if (body.action === 'hold') {
+    if (!body.userId) return json({ error: 'userId required' }, 400);
+    const selected = seats.filter((seat) => body.seatIds.includes(seat.id));
+    if (selected.some((seat) => seat.status !== 'AVAILABLE')) return json({ error: 'One or more seats not available' }, 409);
+    const holdToken = `${createId('hold')}:${body.userId}`;
+    const expiry = Date.now() + 5 * 60 * 1000;
+    selected.forEach((seat) => { seat.status = 'HELD'; seat.holdToken = holdToken; seat.holdExpiry = expiry; });
+    return json({ holdToken, expiry, seats: selected.map((seat) => seat.id) });
+  }
+
+  if (body.action === 'release') {
+    seats.forEach((seat) => {
+      if (seat.holdToken === body.holdToken && seat.status === 'HELD') {
+        seat.status = 'AVAILABLE';
+        seat.holdToken = '';
+        seat.holdExpiry = 0;
+      }
+    });
+    return json({ released: true });
+  }
+
+  if (body.action === 'book') {
+    if (!body.holdToken) return json({ error: 'holdToken required' }, 400);
+    const selected = seats.filter((seat) => body.seatIds.includes(seat.id));
+    const valid = selected.length === body.seatIds.length && selected.every((seat) => seat.status === 'HELD' && seat.holdToken === body.holdToken && seat.holdExpiry > Date.now());
+    if (!valid) return json({ error: 'Seats are no longer held by this user' }, 409);
+    selected.forEach((seat) => {
+      seat.status = 'BOOKED';
+      seat.holdToken = '';
+      seat.holdExpiry = 0;
+    });
+    return json({ booked: body.seatIds });
+  }
+
+  if (body.action === 'block') {
+    seats.forEach((seat) => {
+      if (body.seatIds.includes(seat.id)) seat.status = 'BLOCKED';
+    });
+    return json({ blocked: body.seatIds });
+  }
+
+  return json({ error: 'Unsupported action' }, 400);
+}
+
+
+============================================================
+FILE: app/api/locations/route.ts
+============================================================
+import { json, serviceState } from '@/lib/serviceState';
+import { persistServiceState } from '@/lib/serviceState';
+
+export async function GET() {
+  return json({ locations: serviceState.locations });
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const city = String(body.city || '').trim();
+    if (!city) return json({ error: 'city is required' }, 400);
+    if (!serviceState.locations.includes(city)) {
+      serviceState.locations.push(city);
+      persistServiceState('locations.create', { city });
+    }
+    return json({ locations: serviceState.locations, added: city });
+  } catch (error) {
+    console.error('[locations] POST failed', error);
+    return json({ error: 'Internal error while saving location' }, 500);
+  }
+}
+
+
+============================================================
+FILE: app/api/notifications/route.ts
+============================================================
+import { createId, json, serviceState } from '@/lib/serviceState';
+
+export async function GET() {
+  return json({ notifications: serviceState.notifications });
+}
+
+export async function POST(req: Request) {
+  const body = await req.json();
+  const channel = body.channel || 'EMAIL';
+  const recipientEmail = body.recipientEmail || '';
+  let providerStatus = 'SKIPPED';
+
+  if (channel === 'EMAIL' && recipientEmail) {
+    // External email service integration point (SendGrid/SES/etc.)
+    // Configure SMTP_* env vars to enable.
+    providerStatus = process.env.SMTP_HOST ? 'QUEUED' : 'SENT_MOCK';
+  }
+
+  const item = {
+    id: createId('ntf'),
+    userId: body.userId,
+    type: body.type || 'booking_successful',
+    status: providerStatus,
+    payload: JSON.stringify({ ...(body.payload || {}), channel, recipientEmail }),
+    sentAt: Date.now()
+  };
+  serviceState.notifications.unshift(item);
+  return json({
+    notification: item,
+    integration: channel === 'EMAIL'
+      ? (recipientEmail ? 'Email notification recorded. Set SMTP_HOST and provider credentials to enable real delivery.' : 'recipientEmail missing')
+      : 'Notification recorded'
+  }, 201);
+}
+
+
+============================================================
+FILE: app/api/payments/initiate/route.ts
+============================================================
+import { POST as paymentsPost } from '@/app/api/payments/route';
+export { paymentsPost as POST };
+
+
+============================================================
+FILE: app/api/payments/route.ts
+============================================================
+import { createId, json, serviceState } from '@/lib/serviceState';
+import { persistServiceState } from '@/lib/serviceState';
+import { publishKafkaEvent } from '@/lib/kafka';
+import { publishSnsNotification } from '@/lib/aws';
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const duplicate = serviceState.payments.find((payment) => payment.idempotencyKey === body.idempotencyKey);
+    if (duplicate) return json({ payment: duplicate, duplicate: true });
+
+  const payment = {
+    id: createId('pay'),
+    bookingId: body.bookingId,
+    provider: body.provider || 'RAZORPAY',
+    providerRef: createId('rzp'),
+    status: body.status || 'SUCCESS',
+    amount: body.amount,
+    idempotencyKey: body.idempotencyKey,
+    createdAt: Date.now()
+  };
+    serviceState.payments.push(payment);
+
+    const booking = serviceState.bookings.find((item) => item.id === body.bookingId);
+    if (booking) booking.status = payment.status === 'SUCCESS' ? 'CONFIRMED' : 'FAILED';
+    persistServiceState('payments.create', { paymentId: payment.id, bookingId: body.bookingId, status: payment.status });
+    await publishKafkaEvent('payment.completed', { bookingId: body.bookingId, payload: payment });
+    if (booking && payment.status === 'SUCCESS') {
+      await publishKafkaEvent('booking.confirmed', { bookingId: booking.id, payload: booking });
+      await publishSnsNotification({ type: 'payment', userId: booking.userId, message: `Payment completed for booking ${booking.id}`, timestamp: new Date().toISOString() });
+    }
+
+    return json({ payment });
+  } catch (error) {
+    console.error('[payments] POST failed', error);
+    return json({ error: 'Internal error while processing payment' }, 500);
+  }
+}
+
+
+============================================================
+FILE: app/api/payments/webhook/route.ts
+============================================================
+import { POST as paymentsPost } from '@/app/api/payments/route';
+export { paymentsPost as POST };
+
+
+============================================================
+FILE: app/api/reporting/route.ts
+============================================================
+import { json, serviceState } from '@/lib/serviceState';
+
+export async function GET() {
+  const confirmed = serviceState.bookings.filter((booking) => booking.status === 'CONFIRMED');
+  const revenue = confirmed.reduce((sum, booking) => sum + booking.totalAmount, 0);
+  const failedPayments = serviceState.payments.filter((payment) => payment.status !== 'SUCCESS').length;
+  const topEvents: Record<string, number> = {};
+  confirmed.forEach((booking) => {
+    topEvents[booking.eventId] = (topEvents[booking.eventId] || 0) + 1;
+  });
+
+  return json({
+    bookingReports: serviceState.bookings.length,
+    revenueReports: revenue,
+    occupancyReports: confirmed.length,
+    topEvents,
+    failedPaymentReports: failedPayments,
+    refundReports: serviceState.refunds.length
+  });
+}
+
+
+============================================================
+FILE: app/api/search/route.ts
+============================================================
+import { json, serviceState } from '@/lib/serviceState';
+
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const q = (searchParams.get('q') || '').toLowerCase();
+  const city = searchParams.get('city') || '';
+  const date = searchParams.get('date') || '';
+  const genre = searchParams.get('genre') || '';
+  const language = searchParams.get('language') || '';
+  const minPrice = Number(searchParams.get('minPrice') || 0);
+  const maxPrice = Number(searchParams.get('maxPrice') || Number.MAX_SAFE_INTEGER);
+  const availability = searchParams.get('availability');
+
+  const results = serviceState.events.filter((event) => {
+    const eventAny = event as typeof event & { tags?: string[]; venueName?: string; basePrice?: number };
+    const venue = serviceState.venues.find((item) => item.id === event.venueId);
+    const availableCount = (serviceState.seats[event.id] || []).filter((seat) => seat.status === 'AVAILABLE').length;
+    const searchDoc = [
+      event.title,
+      event.city,
+      venue?.name || eventAny.venueName || '',
+      event.category,
+      event.description || '',
+      ...(eventAny.tags || [])
+    ].join(' ').toLowerCase();
+    const price = eventAny.basePrice || Math.min(...(serviceState.seats[event.id] || []).map((seat) => seat.price)) || 0;
+
+    return (!q || searchDoc.includes(q))
+      && (!city || event.city.toLowerCase() === city.toLowerCase())
+      && (!date || event.startTime.slice(0, 10) === date)
+      && (!genre || event.category.toLowerCase() === genre.toLowerCase())
+      && (!language || event.language.toLowerCase() === language.toLowerCase())
+      && price >= minPrice
+      && price <= maxPrice
+      && (!availability || (availability === 'available' ? availableCount > 0 : availableCount === 0));
+  });
+
+  return json({
+    results,
+    total: results.length,
+    strategy: {
+      engine: 'elasticsearch-ready-mock',
+      searchableFields: ['title', 'city', 'venue', 'category', 'tags', 'description'],
+      filters: ['city', 'date', 'genre', 'language', 'price', 'availability']
+    }
+  });
+}
+
+
+============================================================
+FILE: app/api/storage/route.ts
+============================================================
+import { buildS3Key, buildS3Url, getS3Config, StorageAssetType } from '@/lib/s3Config';
+import { json } from '@/lib/serviceState';
+import { putObjectToS3 } from '@/lib/s3Upload';
+
+function buildTicketPdf(bookingId: string, eventTitle: string, seats: string[], amount: number) {
+  const content = `TicketPulse Ticket\nBooking: ${bookingId}\nEvent: ${eventTitle}\nSeats: ${seats.join(', ')}\nAmount: INR ${amount}`;
+  return `%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 300]/Contents 4 0 R/Resources<<>>>>endobj\n4 0 obj<</Length ${content.length + 40}>>stream\nBT /F1 12 Tf 20 260 Td (${content.replace(/\n/g, ' ')}) Tj ET\nendstream endobj\ntrailer<</Root 1 0 R>>\n%%EOF`;
+}
+
+export async function GET() {
+  return json({ storage: getS3Config() });
+}
+
+export async function POST(req: Request) {
+  const body = await req.json();
+
+  if (body.action === 'upload-ticket') {
+    try {
+      const { region, bucket } = getS3Config();
+      const qrKey = buildS3Key('qrImage', `${body.bookingId}.svg`);
+      const ticketPdfKey = buildS3Key('ticketPdf', `${body.bookingId}.pdf`);
+
+      const qrUrl = await putObjectToS3({ region, bucket, key: qrKey, body: body.qrSvg as string, contentType: 'image/svg+xml' });
+      const ticketPdf = buildTicketPdf(body.bookingId, body.eventTitle, body.seats || [], body.amount || 0);
+      const ticketPdfUrl = await putObjectToS3({ region, bucket, key: ticketPdfKey, body: ticketPdf, contentType: 'application/pdf' });
+
+      return json({ uploaded: true, qrUrl, ticketPdfUrl, invoiceUrl: buildS3Url('invoice', `${body.bookingId}.pdf`), logsUrl: buildS3Url('logArchive', `${body.bookingId}.json`) });
+    } catch (error) {
+      return json({ uploaded: false, error: (error as Error).message }, 500);
+    }
+  }
+
+  const type = body.type as StorageAssetType;
+  const fileName = body.fileName as string;
+  if (!type || !fileName) return json({ error: 'type and fileName required' }, 400);
+  const key = buildS3Key(type, fileName);
+  const url = buildS3Url(type, fileName);
+  return json({ key, url, note: 'Bucket/folder configured. Use AWS SDK upload flow with this key.' });
+}
+
+
+============================================================
+FILE: app/api/user/route.ts
+============================================================
+import { json, serviceState } from '@/lib/serviceState';
+
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const userId = searchParams.get('userId');
+  if (!userId) return json({ users: serviceState.users });
+  const user = serviceState.users.find((item) => item.id === userId);
+  if (!user) return json({ error: 'User not found' }, 404);
+  const bookingHistory = serviceState.bookings.filter((booking) => booking.userId === userId);
+  return json({ user, bookingHistory, preferences: { city: user.cityPreference, savedCategories: ['Music', 'Comedy'] } });
+}
+
+export async function POST(req: Request) {
+  const body = await req.json();
+  const userId = String(body.userId || '');
+  if (!userId) return json({ error: 'userId is required' }, 400);
+  const user = serviceState.users.find((item) => item.id === userId);
+  if (!user) return json({ error: 'User not found' }, 404);
+  if (typeof body.name === 'string') user.name = body.name.trim() || user.name;
+  if (typeof body.email === 'string') user.email = body.email.trim().toLowerCase();
+  if (typeof body.phone === 'string' && body.phone.trim()) user.phone = body.phone.trim();
+  return json({ user });
+}
+
+
+============================================================
+FILE: app/api/venues/route.ts
+============================================================
+import { createId, json, serviceState } from '@/lib/serviceState';
+import { persistServiceState } from '@/lib/serviceState';
+
+export async function GET() {
+  return json({ venues: serviceState.venues });
+}
+
+export async function POST(req: Request) {
+  try {
+  const body = await req.json();
+  if (body.action === 'create') {
+    if (body.city && !serviceState.locations.includes(body.city)) serviceState.locations.push(body.city);
+    const venue = { id: createId('v'), name: body.name, city: body.city, address: body.address || '', capacity: body.capacity || 0, hall: body.hall || 'Main', categories: body.categories || ['Regular'] };
+    serviceState.venues.push(venue);
+    persistServiceState('venues.create', { venueId: venue.id });
+    return json({ venue }, 201);
+  }
+  if (body.action === 'update') {
+    const venue = serviceState.venues.find((item) => item.id === body.venueId);
+    if (!venue) return json({ error: 'Venue not found' }, 404);
+    if (body.updates?.city && !serviceState.locations.includes(body.updates.city)) serviceState.locations.push(body.updates.city);
+    Object.assign(venue, body.updates || {});
+    persistServiceState('venues.update', { venueId: venue.id });
+    return json({ venue });
+  }
+  if (body.action === 'delete') {
+    const idx = serviceState.venues.findIndex((item) => item.id === body.venueId);
+    if (idx === -1) return json({ error: 'Venue not found' }, 404);
+    const [venue] = serviceState.venues.splice(idx, 1);
+    persistServiceState('venues.delete', { venueId: venue.id });
+    return json({ venue, deleted: true });
+  }
+  if (body.action === 'seat-layout') {
+    const seats = serviceState.seats[body.eventId] ?? [];
+    return json({ eventId: body.eventId, seats });
+  }
+  if (body.action === 'update-seat-layout') {
+    const rows = Math.max(1, Number(body.rows || 1));
+    const cols = Math.max(1, Number(body.cols || 1));
+    const vipRows = Math.max(0, Math.min(rows, Number(body.vipRows || 0)));
+    const seats = Array.from({ length: rows * cols }).map((_, index) => {
+      const rowIndex = Math.floor(index / cols);
+      const colIndex = (index % cols) + 1;
+      const rowLabel = String.fromCharCode(65 + rowIndex);
+      const isVip = rowIndex < vipRows;
+      return {
+        id: `${rowLabel}${colIndex}`,
+        rowLabel,
+        seatNumber: `${colIndex}`,
+        category: isVip ? 'VIP' : (body.defaultCategory || 'Regular'),
+        price: isVip ? Number(body.vipPrice || 2200) : Number(body.regularPrice || 1200),
+        status: 'AVAILABLE' as const,
+        holdToken: '',
+        holdExpiry: 0
+      };
+    });
+    serviceState.seats[body.eventId] = seats;
+    persistServiceState('venues.seat-layout.update', { eventId: body.eventId });
+    return json({ eventId: body.eventId, seats, updated: true });
+  }
+  return json({ error: 'Unsupported action' }, 400);
+  } catch (error) {
+    console.error('[venues] POST failed', error);
+    return json({ error: 'Internal error while saving venue data' }, 500);
+  }
+}
+
+
+============================================================
+FILE: app/auth/page.tsx
+============================================================
+'use client';
+
+import { FormEvent, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { AppUser, getActiveUser, logoutUser, setActiveUser as persistActiveUser } from '@/lib/clientStore';
+
+export default function AuthPage() {
+  const router = useRouter();
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [otp, setOtp] = useState('');
+  const [mode, setMode] = useState<'login' | 'signup'>('signup');
+  const [message, setMessage] = useState('');
+  const [activeUser, setActiveUserState] = useState<AppUser | null>(null);
+
+  useEffect(() => {
+    const user = getActiveUser();
+    setActiveUserState(user);
+  }, []);
+
+  const parseResponseData = async (response: Response) => {
+    const text = await response.text();
+    if (!text) return {};
+    try {
+      return JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return { error: text || 'Server returned invalid response.' };
+    }
+  };
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setMessage('');
+
+    if (!phone.trim() || !otp.trim()) {
+      setMessage('Phone number and OTP are required.');
+      return;
+    }
+    const response = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: mode, name, email, phone, otp })
+    });
+    const data = await parseResponseData(response);
+    if (!response.ok) return setMessage((data.error as string) || 'Authentication failed.');
+    persistActiveUser(data.user as AppUser);
+    setMessage(`${mode === 'signup' ? 'Signup' : 'Login'} successful. Redirecting...`);
+    router.push('/');
+  };
+
+  const sendOtp = async () => {
+    const response = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'request-otp', phone })
+    });
+    const data = await parseResponseData(response);
+    if (!response.ok) {
+      const tips = Array.isArray(data.troubleshooting) ? ` Tips: ${(data.troubleshooting as string[]).join(' | ')}` : '';
+      const code = data.snsErrorCode ? ` [${String(data.snsErrorCode)}]` : '';
+      const raw = data.snsError ? ` (${String(data.snsError)})` : '';
+      return setMessage(`${(data.error as string) || 'Unable to send OTP.'}${code}${raw}${tips}`);
+    }
+    setMessage(String(data.message || 'OTP sent to your phone.'));
+  };
+
+  const updateProfile = async () => {
+    if (!activeUser) return;
+    const response = await fetch('/api/user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: activeUser.id, name, email })
+    });
+    const data = await parseResponseData(response);
+    if (!response.ok) return setMessage((data.error as string) || 'Profile update failed.');
+    persistActiveUser(data.user as AppUser);
+    setActiveUserState(data.user as AppUser);
+    setMessage('Profile updated. You can change name and email here after sign-in.');
+  };
+
+  const adminDemoLogin = async () => {
+    const response = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'admin-demo-login' })
+    });
+    const data = await parseResponseData(response);
+    if (!response.ok) return setMessage((data.error as string) || 'Admin login failed.');
+    persistActiveUser(data.user as AppUser);
+    setActiveUserState(data.user as AppUser);
+    setMessage('Admin demo login successful.');
+    router.push('/admin');
+  };
+
+  const onLogout = () => {
+    logoutUser();
+    setActiveUserState(null);
+    setMessage('Logged out successfully.');
+  };
+
+  return (
+    <section className="card stack auth-card">
+      <h1>{mode === 'signup' ? 'Create account' : 'Login'}</h1>
+      <p>Phone number OTP login. New users can update profile/login details after first sign-in.</p>
+      <button className="btn ghost" type="button" onClick={adminDemoLogin}>Use Admin Demo Login</button>
+
+      {activeUser ? (
+        <div className="card stack">
+          <p>Active user: {activeUser.name} ({activeUser.phone || 'No phone'})</p>
+          <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Update name" />
+          <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Update email" />
+          <button className="btn" type="button" onClick={updateProfile}>Update profile</button>
+          <button className="btn ghost" onClick={onLogout}>Logout</button>
+        </div>
+      ) : (
+        <form onSubmit={submit} className="stack" action="#">
+          {mode === 'signup' && (
+            <>
+              <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" />
+              <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)" type="email" />
+            </>
+          )}
+          <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number (+91xxxxxxxxxx)" />
+          <div className="row gap-sm wrap">
+            <input className="input" value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="6-digit OTP" />
+            <button className="btn ghost" type="button" onClick={sendOtp}>Send OTP</button>
+          </div>
+          {message && <p>{message}</p>}
+          <button className="btn" type="submit">{mode === 'signup' ? 'Sign up' : 'Login'}</button>
+        </form>
+      )}
+
+      {!activeUser && (
+        <button className="btn ghost" onClick={() => setMode(mode === 'signup' ? 'login' : 'signup')}>
+          Switch to {mode === 'signup' ? 'Login' : 'Signup'}
+        </button>
+      )}
+    </section>
+  );
+}
+
+
+============================================================
+FILE: app/booking/[id]/page.tsx
+============================================================
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import Image from 'next/image';
+import { useParams, useRouter } from 'next/navigation';
+import { getActiveUser, pushNotification, saveBooking } from '@/lib/clientStore';
+import { buildS3Url } from '@/lib/s3Config';
+
+type Hold = { seats: string[]; expiresAt: number; amount: number; holdToken: string; userId: string };
+
+function pseudoQrDataUrl(payload: string): string {
+  const bytes = Array.from(payload).map((char) => char.charCodeAt(0));
+  const size = 21;
+  let squares = '';
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const idx = (x * 7 + y * 13) % bytes.length;
+      const on = (bytes[idx] + x + y) % 2 === 0;
+      if (on) squares += `<rect x="${x}" y="${y}" width="1" height="1" fill="black" />`;
+    }
+  }
+  return `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="210" height="210" viewBox="0 0 ${size} ${size}"><rect width="100%" height="100%" fill="white"/>${squares}</svg>`)}`;
+}
+
+function isValidUpi(upi: string) {
+  return /^[\w.-]{2,}@[\w.-]{2,}$/.test(upi);
+}
+
+export default function BookingPage() {
+  const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const [event, setEvent] = useState<{ id: string; title: string } | null>(null);
+  const [hold, setHold] = useState<Hold | null>(null);
+  const [remaining, setRemaining] = useState(0);
+  const [ticket, setTicket] = useState<{ bookingId: string; qr: string } | null>(null);
+  const [upiId, setUpiId] = useState('');
+  const [paymentMessage, setPaymentMessage] = useState('');
+
+  useEffect(() => {
+    const raw = localStorage.getItem(`hold:${id}`);
+    if (raw) setHold(JSON.parse(raw) as Hold);
+  }, [id]);
+
+  useEffect(() => {
+    const load = async () => {
+      const eventRes = await fetch(`/api/events/${id}`);
+      const data = await eventRes.json();
+      setEvent(data.event || null);
+    };
+    load();
+  }, [id]);
+
+  useEffect(() => {
+    if (!hold) return;
+    const tick = () => {
+      const ms = hold.expiresAt - Date.now();
+      if (ms <= 0) {
+        localStorage.removeItem(`hold:${id}`);
+        setHold(null);
+        setRemaining(0);
+        return;
+      }
+      setRemaining(Math.floor(ms / 1000));
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [hold, id]);
+
+  const mmss = useMemo(() => `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`, [remaining]);
+
+  const payNow = async () => {
+    if (!hold || !event) return;
+    const user = getActiveUser();
+    if (!user) return router.push('/auth');
+    if (hold.userId !== user.id) {
+      setPaymentMessage('This hold belongs to another account. Please select seats again.');
+      return;
+    }
+    if (!isValidUpi(upiId)) return setPaymentMessage('Enter valid UPI ID (example: name@bank).');
+
+    const bookingId = `BKG-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    const paymentResponse = await fetch('/api/payments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookingId, amount: hold.amount, status: 'SUCCESS', idempotencyKey: `IDEMP-${bookingId}`, upiId, provider: 'RAZORPAY_UPI' })
+    });
+    if (!paymentResponse.ok) {
+      setPaymentMessage('Payment failed. Please try again.');
+      return;
+    }
+
+    const bookingResponse = await fetch('/api/bookings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create', userId: user.id, eventId: id, seats: hold.seats, totalAmount: hold.amount })
+    });
+    if (!bookingResponse.ok) {
+      setPaymentMessage('Could not create booking.');
+      return;
+    }
+
+    const inventoryBookResponse = await fetch('/api/inventory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'book', eventId: id, seatIds: hold.seats, holdToken: hold.holdToken, userId: user.id })
+    });
+    if (!inventoryBookResponse.ok) {
+      setPaymentMessage('Seat booking failed. Payment will be reconciled.');
+      return;
+    }
+
+    const qr = pseudoQrDataUrl(JSON.stringify({ bookingId, eventId: id, seats: hold.seats, upiId, ts: Date.now() }));
+    const qrSvg = decodeURIComponent(qr.replace('data:image/svg+xml;utf8,', ''));
+
+    const uploadResponse = await fetch('/api/storage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upload-ticket', bookingId, eventTitle: event.title, seats: hold.seats, amount: hold.amount, qrSvg })
+    });
+    const uploadData = await uploadResponse.json();
+
+    saveBooking({
+      id: bookingId,
+      userId: user.id,
+      userEmail: user.email,
+      eventId: id,
+      eventTitle: event.title,
+      seats: hold.seats,
+      amount: hold.amount,
+      status: 'CONFIRMED',
+      qr,
+      createdAt: Date.now(),
+      cancellable: true,
+      s3Assets: {
+        ticketPdfUrl: uploadData.ticketPdfUrl || buildS3Url('ticketPdf', `${bookingId}.pdf`),
+        qrImageUrl: uploadData.qrUrl || buildS3Url('qrImage', `${bookingId}.svg`),
+        invoiceUrl: uploadData.invoiceUrl || buildS3Url('invoice', `${bookingId}.pdf`),
+        logsUrl: uploadData.logsUrl || buildS3Url('logArchive', `${bookingId}.json`)
+      }
+    });
+
+    pushNotification(`Booking ${bookingId} confirmed. Email sent to ${user.email}`, 'EMAIL');
+    pushNotification(`UPI payment success for ${bookingId}`, 'PUSH');
+    await fetch('/api/notifications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: user.id,
+        type: 'booking_confirmed',
+        channel: 'EMAIL',
+        recipientEmail: user.email,
+        payload: { bookingId, eventId: id, seats: hold.seats, amount: hold.amount }
+      })
+    });
+    setPaymentMessage(`Razorpay UPI payment successful. Confirmation email sent to ${user.email}.`);
+    setTicket({ bookingId, qr });
+    localStorage.removeItem(`hold:${id}`);
+  };
+
+  if (!event) return <p>Event not found.</p>;
+
+  return (
+    <section className="modern-page stack-xl">
+      <div className="modern-header">
+        <h1>Checkout</h1>
+        <p>Secure booking with Razorpay UPI for {event.title}</p>
+      </div>
+
+      <div className="modern-card stack">
+        {ticket ? (
+          <>
+            <h3>Booking confirmed: {ticket.bookingId}</h3>
+            <Image src={ticket.qr} alt="Ticket QR code" width={240} height={240} className="qr" unoptimized />
+            <div className="row gap-sm wrap">
+              <a className="btn" href={ticket.qr} download={`${ticket.bookingId}.svg`}>Download QR ticket</a>
+              <button className="btn ghost" onClick={() => router.push('/bookings')}>My bookings</button>
+            </div>
+          </>
+        ) : hold ? (
+          <>
+            <p>Seats: {hold.seats.join(', ')} • Total: ₹{hold.amount}</p>
+            <p className="muted">Hold expires in {mmss}</p>
+            <div className="razorpay-box stack">
+              <h3>Razorpay UPI</h3>
+              <input className="input" placeholder="yourname@okaxis" value={upiId} onChange={(e) => setUpiId(e.target.value.trim())} />
+              <button className="btn" onClick={payNow}>Pay ₹{hold.amount} via UPI</button>
+              {paymentMessage && <p>{paymentMessage}</p>}
+            </div>
+          </>
+        ) : (
+          <button className="btn" onClick={() => router.push(`/events/${id}`)}>Return to seat map</button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+
+============================================================
+FILE: app/bookings/page.tsx
+============================================================
+'use client';
+
+import { useEffect, useState } from 'react';
+import { canCancelBooking, cancelBooking, getActiveUser, getBookingsForUser } from '@/lib/clientStore';
+import { formatDateTime } from '@/lib/format';
+
+export default function MyBookingsPage() {
+  const [bookings, setBookings] = useState<ReturnType<typeof getBookingsForUser>>([]);
+  const [userLabel, setUserLabel] = useState('');
+  const [message, setMessage] = useState('');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  useEffect(() => {
+    const user = getActiveUser();
+    if (!user) {
+      setIsLoggedIn(false);
+      setBookings([]);
+      setUserLabel('');
+      return;
+    }
+    setIsLoggedIn(true);
+    setUserLabel(user.email);
+    setBookings(getBookingsForUser(user.id));
+  }, []);
+
+  const cancel = (id: string) => {
+    const result = cancelBooking(id);
+    if (!result.ok) {
+      setMessage(result.error || 'Unable to cancel booking.');
+      return;
+    }
+    setMessage('Booking cancelled successfully.');
+    const user = getActiveUser();
+    if (!user) return;
+    setBookings(getBookingsForUser(user.id));
+  };
+
+  const upcomingBookings = bookings.filter((booking) => booking.status === 'CONFIRMED' && booking.cancellable);
+  const allOtherBookings = bookings.filter((booking) => !(booking.status === 'CONFIRMED' && booking.cancellable));
+
+  return (
+    <section className="bookings-dashboard">
+      <header className="bookings-header">
+        <h1>My Bookings</h1>
+        {userLabel && <p className="muted">Signed in as {userLabel}</p>}
+        {message && <p className="muted">{message}</p>}
+      </header>
+
+      {!isLoggedIn ? (
+        <article className="booking-card">
+          <p>Please login to view your bookings.</p>
+          <a className="btn booking-cta" href="/auth">Go to Login</a>
+        </article>
+      ) : bookings.length === 0 ? (
+        <article className="booking-card"><p>No bookings yet.</p></article>
+      ) : (
+        <div className="stack">
+          <div>
+            <h2 className="bookings-subtitle">Upcoming Bookings</h2>
+            <div className="bookings-grid-3">
+              {upcomingBookings.length === 0 ? (
+                <article className="booking-card"><p>No upcoming bookings.</p></article>
+              ) : upcomingBookings.map((booking) => {
+                const isConfirmed = booking.status === 'CONFIRMED';
+                return (
+                  <article key={`up-${booking.id}`} className="booking-card">
+                    <h3>{booking.eventTitle}</h3>
+                    <p>Status: <span className={isConfirmed ? 'status-confirmed' : 'status-cancelled'}>{booking.status}</span></p>
+                    <p>Seats: {booking.seats.join(', ')}</p>
+                    <p>Amount: ₹{booking.amount}</p>
+                    <p>{formatDateTime(booking.createdAt)}</p>
+                    <a className="btn booking-cta" href={booking.qr} download={`${booking.id}.png`}>Download ticket QR</a>
+                    {booking.status === 'CONFIRMED' && booking.cancellable && canCancelBooking(booking.createdAt) && (
+                      <button className="cancel-link" onClick={() => cancel(booking.id)}>Cancel booking</button>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <h2 className="bookings-subtitle">All Bookings</h2>
+            <div className="bookings-grid-3">
+              {allOtherBookings.length === 0 ? (
+                <article className="booking-card"><p>No additional bookings.</p></article>
+              ) : allOtherBookings.map((booking) => {
+                const isConfirmed = booking.status === 'CONFIRMED';
+                return (
+                  <article key={`all-${booking.id}`} className="booking-card">
+                    <h3>{booking.eventTitle}</h3>
+                    <p>Status: <span className={isConfirmed ? 'status-confirmed' : 'status-cancelled'}>{booking.status}</span></p>
+                    <p>Seats: {booking.seats.join(', ')}</p>
+                    <p>Amount: ₹{booking.amount}</p>
+                    <p>{formatDateTime(booking.createdAt)}</p>
+                    <a className="btn booking-cta" href={booking.qr} download={`${booking.id}.png`}>Download ticket QR</a>
+                    {booking.s3Assets && (
+                      <div className="asset-links">
+                        <a href={booking.s3Assets.ticketPdfUrl} target="_blank" rel="noreferrer">Ticket PDF</a>
+                        <a href={booking.s3Assets.qrImageUrl} target="_blank" rel="noreferrer">QR Image</a>
+                        <a href={booking.s3Assets.invoiceUrl} target="_blank" rel="noreferrer">Invoice</a>
+                        <a href={booking.s3Assets.logsUrl} target="_blank" rel="noreferrer">QR data JSON</a>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+
+============================================================
+FILE: app/events/[id]/page.tsx
+============================================================
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { formatDateTime } from '@/lib/format';
+import { getActiveUser } from '@/lib/clientStore';
+
+const HOLD_MINUTES = 5;
+
+export default function EventDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const [event, setEvent] = useState<{ id: string; title: string; city: string; startTime: string; venueId: string; description: string; basePrice?: number } | null>(null);
+  const [venueName, setVenueName] = useState('');
+  const [seats, setSeats] = useState<{ id: string; seatNumber?: string; status: string; price?: number; holdExpiry?: number }[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const load = async () => {
+      const [eventRes, venuesRes, seatsRes] = await Promise.all([fetch(`/api/events/${id}`), fetch('/api/venues'), fetch(`/api/inventory?eventId=${id}`)]);
+      const eventData = await eventRes.json();
+      const venuesData = await venuesRes.json();
+      const seatsData = await seatsRes.json();
+      const eventItem = eventData.event || null;
+      setEvent(eventItem);
+      setSeats(seatsData.seats ?? []);
+      setVenueName((venuesData.venues || []).find((v: { id: string }) => v.id === eventItem?.venueId)?.name || eventItem?.venueId || '');
+    };
+    load();
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
+  }, [id]);
+
+  const total = useMemo(() => {
+    if (!event) return 0;
+    const selectedSeats = seats.filter((seat) => selected.includes(seat.id));
+    if (!selectedSeats.length) return selected.length * (event.basePrice || 1200);
+    return selectedSeats.reduce((sum, seat) => sum + (seat.price ?? (event.basePrice || 1200)), 0);
+  }, [selected, seats, event]);
+
+  if (!event) return <p>Event not found.</p>;
+
+  const toggleSeat = (seatId: string) => {
+    setSelected((prev) => prev.includes(seatId) ? prev.filter((s) => s !== seatId) : [...prev, seatId]);
+  };
+
+  const holdSeats = async () => {
+    const user = getActiveUser();
+    if (!user) {
+      router.push('/auth');
+      return;
+    }
+    if (!selected.length) return;
+    setError('');
+    const response = await fetch('/api/inventory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'hold', eventId: id, seatIds: selected, userId: user.id })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setError(data.error || 'Unable to hold seats.');
+      return;
+    }
+    localStorage.setItem(`hold:${id}`, JSON.stringify({ seats: data.seats, expiresAt: data.expiry, amount: total, holdToken: data.holdToken, userId: user.id }));
+    router.push(`/booking/${id}`);
+  };
+
+  return (
+    <section className="stack-xl">
+      <div className="panel hero-mini">
+        <h1>{event.title}</h1>
+        <p>{venueName} • {event.city} • {formatDateTime(event.startTime)}</p>
+        <p>{event.description}</p>
+      </div>
+
+      <div className="panel">
+        <div className="row between center wrap">
+          <h3>Venue seat layout</h3>
+          <p className="muted">Gray = unavailable • Blue = selected</p>
+        </div>
+        <div className="seats">
+          {seats.map((seat) => {
+            const isSelected = selected.includes(seat.id);
+            const disabled = seat.status !== 'AVAILABLE';
+            return (
+              <button
+                key={seat.id}
+                className={`seat ${isSelected ? 'active' : ''}`}
+                disabled={disabled}
+                onClick={() => toggleSeat(seat.id)}
+              >
+                {seat.seatNumber || seat.id}
+              </button>
+            );
+          })}
+        </div>
+        {error && <p className="error-text">{error}</p>}
+      </div>
+
+      <div className="panel row between center wrap">
+        <p>{selected.length} seats • ₹{total}</p>
+        <button className="btn" onClick={holdSeats}>Hold for {HOLD_MINUTES} min</button>
+      </div>
+    </section>
+  );
+}
+
+
+============================================================
+FILE: app/globals.css
+============================================================
+:root {
+  color-scheme: dark;
+  --bg: #0a0722;
+  --panel: rgba(18, 17, 45, 0.92);
+  --line: rgba(255, 255, 255, 0.16);
+  --text: #ffffff;
+  --muted: #d0d7ff;
+  --accent1: #6a5cff;
+  --accent2: #28d4ff;
+  --fs-h1: clamp(1.8rem, 2.8vw, 2.6rem);
+  --fs-h2: clamp(1.35rem, 2vw, 1.95rem);
+  --fs-body: clamp(0.92rem, 1.1vw, 1rem);
+}
+
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: 'Inter', 'Poppins', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 20% 10%, rgba(106, 92, 255, .35), transparent 30%),
+    radial-gradient(circle at 80% 20%, rgba(40, 212, 255, .2), transparent 25%),
+    var(--bg);
+}
+a { color: inherit; text-decoration: none; }
+.container { width: min(1180px, 92vw); margin: 0 auto; }
+.page-wrap { padding: 1rem 0 2.6rem; }
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  border-bottom: 1px solid var(--line);
+  background: rgba(8, 8, 22, .72);
+  backdrop-filter: blur(12px);
+}
+.nav-shell { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .85rem 0; flex-wrap: wrap; }
+.brand { display: grid; font-weight: 800; letter-spacing: .2px; }
+.brand span { font-size: .75rem; color: var(--muted); font-weight: 500; }
+.navlinks { display: flex; gap: .9rem; flex-wrap: wrap; }
+.navlinks a { padding: .4rem .65rem; border-radius: 999px; border: 1px solid transparent; }
+.navlinks a:hover { border-color: var(--line); background: rgba(255,255,255,.06); }
+
+.stack-xl { display: grid; gap: 1.2rem; }
+.stack { display: grid; gap: 1rem; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 24px; padding: 1rem; }
+.auth-card { max-width: 520px; margin: 0 auto; }
+.warning { color: var(--muted); }
+.panel {
+  background: linear-gradient(170deg, rgba(31, 30, 73, .72), var(--panel));
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  padding: 1rem;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, .2);
+}
+
+.hero-shell {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1rem;
+  align-items: stretch;
+  padding: 1.2rem;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: linear-gradient(130deg, rgba(106, 92, 255, .28), rgba(40, 212, 255, .08));
+}
+.hero-content h1 { margin: 0; font-size: clamp(1.5rem, 3vw, 2.4rem); line-height: 1.2; }
+.eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: .75rem; color: var(--muted); }
+.subtitle { color: var(--muted); max-width: 58ch; }
+.hero-cta { display: flex; gap: .7rem; flex-wrap: wrap; }
+.hero-stats { display: grid; gap: .6rem; }
+.hero-stats article { border: 1px solid var(--line); background: rgba(255,255,255,.04); border-radius: 22px; padding: .8rem; display: grid; }
+.hero-stats strong { font-size: 1.2rem; }
+.hero-stats span { color: var(--muted); font-size: .88rem; }
+
+.filters { display: grid; grid-template-columns: repeat(3, minmax(160px, 1fr)); gap: .8rem; }
+.input, select {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .03);
+  color: #fff;
+  border-radius: 18px;
+  padding: 0 .75rem;
+}
+
+.event-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem; }
+.event-card { background: var(--panel); border: 1px solid var(--line); border-radius: 24px; padding: 1rem; display: grid; gap: .55rem; }
+.card-foot { display: flex; justify-content: space-between; align-items: center; gap: .8rem; }
+.pill { width: max-content; padding: .2rem .5rem; border-radius: 999px; background: rgba(106, 92, 255, .25); font-size: .75rem; }
+
+.btn {
+  border: 0;
+  color: #fff;
+  border-radius: 18px;
+  cursor: pointer;
+  font-weight: 700;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  padding: .65rem 1rem;
+  background: linear-gradient(120deg, var(--accent1), var(--accent2));
+}
+.btn.ghost { background: transparent; border: 1px solid var(--line); }
+
+.row { display: flex; }
+.between { justify-content: space-between; }
+.center { align-items: center; }
+.wrap { flex-wrap: wrap; }
+.gap-sm { gap: .75rem; }
+
+.hero-mini h1 { margin-top: 0; }
+.seats { display: grid; gap: .5rem; grid-template-columns: repeat(8, minmax(40px,1fr)); margin-top: .8rem; }
+.seat { padding: .45rem; border-radius: 8px; border: 1px solid var(--line); background:#171b31; color:#d7defc; }
+.seat.active { background: #4051ff; color: #fff; }
+.seat:disabled { opacity:.45; cursor:not-allowed; }
+.muted { color: var(--muted); }
+
+.qr { width: 240px; max-width: 100%; background: #fff; padding: .5rem; border-radius: 8px; }
+.razorpay-box { margin-top: .9rem; padding: .9rem; border-radius: 22px; border: 1px dashed rgba(40, 212, 255, .55); background: rgba(40, 212, 255, .08); }
+
+@media (max-width: 920px) {
+  .hero-shell { grid-template-columns: 1fr; }
+  .filters { grid-template-columns: 1fr; }
+}
+
+.modern-page {
+  min-height: calc(100vh - 90px);
+  background: radial-gradient(circle at top left, rgba(51, 88, 255, 0.22), transparent 32%), linear-gradient(180deg, #060817, #040414);
+  color: #f8fbff;
+  border-radius: 26px;
+  padding: 1rem;
+}
+.modern-page * { color: inherit; }
+.modern-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: .7rem 1rem;
+  border-radius: 22px;
+  background: rgba(13, 24, 62, .9);
+  border: 1px solid rgba(148, 163, 255, .35);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .25);
+}
+.logo { font-weight: 800; color: #c7d4ff; font-size: 1.25rem; }
+.modern-actions { display: flex; align-items: center; gap: .8rem; }
+.top-link { color: #d6e1ff; }
+.location-btn {
+  border: 1px solid rgba(148, 163, 255, .35);
+  background: rgba(75, 109, 255, 0.28);
+  color: #ffffff;
+  padding: .55rem .9rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.modern-main { max-width: 1120px; margin: 0 auto; padding: 1.6rem .3rem; }
+.modern-header h1 { margin: 0 0 .3rem; font-size: var(--fs-h1); line-height: 1.18; letter-spacing: -.015em; }
+.modern-header p { margin: 0 0 1.1rem; color: #c7d4ff; font-size: var(--fs-body); line-height: 1.6; }
+.modern-header span { color: #7fb0ff; font-weight: 600; }
+.modern-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+.modern-card {
+  background: rgba(13, 24, 62, .9);
+  border: 1px solid rgba(148, 163, 255, .25);
+  border-radius: 26px;
+  padding: 1rem;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, .25);
+  transition: transform .2s ease;
+  animation: fadeUp .4s ease both;
+}
+.modern-card:hover { transform: translateY(-4px); }
+.icon-chip {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 20px;
+  background: #3b82f6;
+  color: #fff;
+  font-weight: 700;
+}
+.modal-root {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, .45);
+  backdrop-filter: blur(4px);
+}
+.modal-card {
+  position: relative;
+  max-width: 840px;
+  width: 100%;
+  background: #0b1232;
+  color: #fff;
+  border-radius: 28px;
+  padding: 1.4rem;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .35);
+}
+.location-search { margin: .8rem 0; background: rgba(6, 10, 28, .88) !important; color: #fff !important; }
+.location-current-btn {
+  border: 0;
+  background: transparent;
+  color: #4f46e5;
+  font-weight: 700;
+  cursor: pointer;
+  margin-bottom: .9rem;
+}
+.location-popular-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: .7rem;
+}
+.location-popular-item {
+  border: 1px solid rgba(148, 163, 255, .35);
+  border-radius: 16px;
+  padding: .65rem;
+  background: rgba(75, 109, 255, 0.28);
+  display: grid;
+  gap: .25rem;
+  justify-items: center;
+  cursor: pointer;
+}
+.location-icon { font-size: 1.2rem; }
+.location-all-title { margin: 1rem 0 .5rem; }
+.location-alpha { color: #a8bcff; letter-spacing: .22em; margin-bottom: .5rem; font-size: .85rem; }
+.location-list-columns {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .45rem .9rem;
+  max-height: 220px;
+  overflow: auto;
+}
+.location-list-city {
+  border: 0;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+  color: #fff;
+  padding: .2rem 0;
+}
+.location-list { display: grid; gap: .6rem; margin-top: .8rem; }
+.location-item {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  background: #fff;
+  padding: .85rem 1rem;
+  cursor: pointer;
+}
+.location-item:hover { border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; }
+.pop-in { animation: pop .24s ease both; }
+@keyframes pop { from { opacity: 0; transform: translateY(10px) scale(.98);} to {opacity:1; transform: none;} }
+@keyframes fadeUp { from {opacity:0; transform: translateY(10px);} to {opacity:1; transform:none;} }
+
+.modern-page .input, .modern-page select {
+  background: rgba(6, 10, 28, .88);
+  color: #fff;
+  border-color: rgba(148, 163, 255, .35);
+}
+
+.bookings-dashboard {
+  min-height: calc(100vh - 100px);
+  background: radial-gradient(circle at top left, rgba(51, 88, 255, 0.22), transparent 32%), linear-gradient(180deg, #060817, #040414);
+  border-radius: 28px;
+  padding: 1.4rem;
+}
+.bookings-header h1 {
+  margin: .3rem 0 1rem;
+  font-size: clamp(1.8rem, 3vw, 2.4rem);
+  font-weight: 800;
+  color: #f8fbff;
+}
+.bookings-list { display: grid; gap: 1rem; }
+.bookings-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+.bookings-subtitle {
+  margin: .4rem 0 .8rem;
+  color: #dce7ff;
+  font-size: 1.2rem;
+}
+.booking-card {
+  background: rgba(14, 19, 43, 0.9);
+  border: 1px solid rgba(123, 141, 255, 0.35);
+  border-radius: 26px;
+  padding: 1.05rem;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, .25);
+  color: #eaf1ff;
+  display: grid;
+  gap: .55rem;
+}
+.booking-card h3 { margin-top: 0; margin-bottom: .8rem; font-size: var(--fs-h2); line-height: 1.25; letter-spacing: -.01em; }
+.status-confirmed { color: #2ddc84; font-weight: 700; }
+.status-cancelled { color: #ff6f6f; font-weight: 700; }
+.booking-cta {
+  width: 100%;
+  margin-top: .5rem;
+  margin-bottom: .6rem;
+  background: linear-gradient(120deg, #3a5eff, #24d7ff);
+  box-shadow: 0 0 0 rgba(36, 215, 255, 0);
+  transition: box-shadow .2s ease;
+}
+.booking-cta:hover { box-shadow: 0 0 20px rgba(36, 215, 255, .35); }
+.asset-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: .45rem;
+  margin: .2rem 0 .7rem;
+}
+.asset-links a {
+  font-size: .85rem;
+  color: #a7d4ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.cancel-link {
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.24);
+  background: transparent;
+  color: #d6defe;
+  padding: .45rem .8rem;
+  cursor: pointer;
+}
+.notification-empty-note {
+  margin: .25rem .2rem 0;
+  color: #b8c9ff;
+  font-size: 1rem;
+}
+
+
+/* Large screens: give cards more breathing room */
+@media (min-width: 1200px) {
+  .bookings-dashboard { padding: 2rem; }
+  .bookings-list { gap: 1.4rem; }
+  .bookings-grid-3 { gap: 1.2rem; }
+  .booking-card { padding: 1.35rem; }
+  .asset-links { grid-template-columns: repeat(4, minmax(140px, 1fr)); }
+  .modern-main { max-width: 1180px; }
+}
+
+/* Mobile-first tuning for 360px devices */
+@media (max-width: 420px) {
+  .container { width: min(96vw, 420px); }
+  .page-wrap { padding-top: .6rem; }
+  .nav-shell { padding: .55rem 0; }
+  .navlinks { gap: .4rem; }
+  .navlinks a { padding: .32rem .5rem; font-size: .74rem; }
+  .modern-page { padding: .75rem; border-radius: 18px; }
+  .modern-nav { padding: .55rem .7rem; }
+  .modern-main { padding: 1rem .1rem; }
+  .modern-grid { grid-template-columns: 1fr; }
+  .location-popular-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .location-list-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bookings-dashboard { padding: .85rem; border-radius: 20px; }
+  .bookings-header h1 { margin-bottom: .7rem; }
+  .bookings-grid-3 { grid-template-columns: 1fr; }
+  .booking-card { padding: .85rem; border-radius: 20px; }
+  .booking-cta { margin-top: .35rem; }
+  .asset-links { grid-template-columns: 1fr 1fr; }
+  .cancel-link { border-radius: 12px; }
+}
+
+/* Admin Console */
+.admin-shell {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: calc(100vh - 64px);
+  gap: 0;
+  background: radial-gradient(circle at top left, rgba(51, 88, 255, 0.22), transparent 32%), linear-gradient(180deg, #060817, #040414);
+  color: #fff;
+}
+
+.admin-shell * { color: #fff; }
+
+.admin-sidebar {
+  background: rgba(10, 17, 44, 0.95);
+  border-right: 1px solid rgba(148, 163, 255, .25);
+  padding: 24px 16px;
+  position: sticky;
+  top: 64px;
+  height: calc(100vh - 64px);
+}
+
+.admin-sidebar h2 { margin: 0 0 16px; font-size: 1.05rem; }
+
+.admin-nav-item {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: #fff;
+  text-decoration: none;
+  margin-bottom: 8px;
+}
+
+.admin-nav-item.active,
+.admin-nav-item:hover { background: rgba(75, 109, 255, 0.32); color: #fff; }
+
+.admin-main { padding: 24px; }
+
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(13, 24, 62, .9);
+  border: 1px solid rgba(148, 163, 255, .35);
+  border-radius: 14px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+}
+
+.admin-header h1 { margin: 0 0 4px; font-size: 1.2rem; }
+.admin-header p { margin: 0; color: #e5ecff; }
+.admin-user-pill { background: rgba(75, 109, 255, 0.32); color: #fff; padding: 8px 12px; border-radius: 999px; font-size: 0.85rem; }
+
+.admin-section { display: flex; flex-direction: column; gap: 16px; }
+.admin-section h2 { margin: 0; font-size: 1.15rem; }
+
+.admin-card-grid { display: grid; gap: 16px; }
+.admin-card-grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.admin-card-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.admin-card-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.admin-card {
+  background: rgba(13, 24, 62, .9);
+  border: 1px solid rgba(148, 163, 255, .25);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.admin-card h3 { margin-top: 0; }
+.admin-link-card { text-decoration: none; color: #e5ecff; font-weight: 600; }
+
+.admin-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  background: rgba(13, 24, 62, .9);
+  border: 1px solid rgba(148, 163, 255, .25);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.admin-form .input,
+.admin-form select {
+  background: rgba(6, 10, 28, .88);
+  border-color: rgba(148, 163, 255, .35);
+  color: #fff;
+}
+
+.event-form,
+.seat-layout-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.event-form .btn,
+.seat-layout-form .btn {
+  align-self: end;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: rgba(13, 24, 62, .9);
+  border: 1px solid rgba(148, 163, 255, .25);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.admin-table th,
+.admin-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(148, 163, 255, .16);
+  vertical-align: middle;
+}
+
+.admin-table th { background: rgba(75, 109, 255, 0.24); font-weight: 600; }
+
+.status-badge {
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: #f3f4f6;
+  font-size: 0.8rem;
+}
+.status-badge.ok { background: #dcfce7; color: #000; }
+.status-badge.warn { background: #fee2e2; color: #000; }
+
+.admin-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  min-height: 140px;
+  border: 1px dashed #d1d5db;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.admin-bar-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.admin-bar { width: 28px; background: linear-gradient(180deg, #3b82f6 0%, #1d4ed8 100%); border-radius: 8px; }
+
+.seat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  gap: 8px;
+}
+
+.seat-cell {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 8px;
+  text-align: center;
+  background: #f8fafc;
+}
+
+.seat-cell.vip { background: #fef3c7; }
+
+.booking-box-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  background-color: #2a2a2a;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 34px 34px;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.booking-box-card {
+  background: #24df00;
+  border: 4px solid #ffffff;
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+}
+
+.booking-box-card p {
+  margin: 0 0 8px;
+  color: #052900 !important;
+}
+
+.booking-box-card p:last-child { margin-bottom: 0; }
+
+.notification-box-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  background-color: #2a2a2a;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 34px 34px;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.notification-box-card {
+  background: #24df00;
+  border: 4px solid #ffffff;
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+  color: #052900 !important;
+}
+
+.notification-box-card p,
+.notification-box-card small { color: #052900 !important; }
+
+@media (max-width: 1100px) {
+  .admin-shell { grid-template-columns: 1fr; }
+  .admin-sidebar { position: static; height: auto; border-right: none; border-bottom: 1px solid #e5e7eb; }
+  .admin-card-grid.four,
+  .admin-card-grid.three,
+  .admin-card-grid.two,
+  .admin-form,
+  .booking-box-grid,
+  .notification-box-grid,
+  .bookings-grid-3 { grid-template-columns: 1fr; }
+}
+
+
+============================================================
+FILE: app/layout.tsx
+============================================================
+import './globals.css';
+import NavBar from '@/components/NavBar';
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <NavBar />
+        <main className="container page-wrap">{children}</main>
+      </body>
+    </html>
+  );
+}
+
+
+============================================================
+FILE: app/notifications/page.tsx
+============================================================
+'use client';
+
+import { useEffect, useState } from 'react';
+import { getActiveUser, getNotifications } from '@/lib/clientStore';
+
+export default function NotificationsPage() {
+  const [notifications, setNotifications] = useState<{ id: string; channel: string; message: string; ts: number }[]>(getNotifications());
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      const user = getActiveUser();
+      if (!user) {
+        setIsLoggedIn(false);
+        setNotifications([]);
+        return;
+      }
+      setIsLoggedIn(true);
+      const serverRes = await fetch('/api/notifications');
+      const serverData = await serverRes.json();
+      const isAdmin = user?.role === 'admin';
+      const server = (serverData.notifications || [])
+        .filter((item: { userId: string; type: string }) => {
+          if (isAdmin) return item.type === 'user_report';
+          return item.userId === user.id && item.type === 'new_event';
+        })
+        .map((item: { id: string; type: string; payload: string; sentAt: number }) => {
+          let parsed: { message?: string; title?: string } = {};
+          try { parsed = JSON.parse(item.payload || '{}'); } catch { parsed = {}; }
+          return {
+            id: `srv-${item.id}`,
+            channel: 'BELL',
+            message: parsed.message || parsed.title || item.type,
+            ts: item.sentAt
+          };
+        });
+      const local = isAdmin ? [] : getNotifications().filter((item) => item.channel === 'BELL');
+      setNotifications([...server, ...local]);
+    };
+    load();
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <section className="modern-page stack-xl">
+      <header className="modern-header">
+        <h1>Notifications</h1>
+      </header>
+
+      {!isLoggedIn ? (
+        <article className="modern-card">
+          <p>Please login to view notifications.</p>
+          <a className="btn" href="/auth">Go to Login</a>
+        </article>
+      ) : notifications.length === 0 ? (
+        <p className="notification-empty-note">No new event notifications available.</p>
+      ) : (
+        <div className="notification-box-grid">
+          {notifications.map((item, index) => (
+            <article key={item.id} className="notification-box-card" style={{ animationDelay: `${index * 50}ms` }}>
+              <p><strong>{item.channel}</strong></p>
+              <p>{item.message}</p>
+              <small>{new Date(item.ts).toLocaleString()}</small>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+
+============================================================
+FILE: app/page.tsx
+============================================================
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { formatDateTime } from '@/lib/format';
+import { getPreferredLocationForActiveUser, setPreferredLocationForActiveUser } from '@/lib/clientStore';
+
+export default function HomePage() {
+  const [isLocationModalOpen, setLocationModalOpen] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState<string>('');
+  const [category, setCategory] = useState('');
+  const [date, setDate] = useState('');
+  const [events, setEvents] = useState<{ id: string; title: string; city: string; category: string; startTime: string; venueId: string; basePrice?: number }[]>([]);
+  const [venues, setVenues] = useState<{ id: string; name: string }[]>([]);
+  const [locations, setLocations] = useState<string[]>([]);
+  const [locationSearch, setLocationSearch] = useState('');
+
+  useEffect(() => {
+    const saved = getPreferredLocationForActiveUser();
+    if (saved) {
+      setSelectedLocation(saved);
+      setLocationModalOpen(false);
+      return;
+    }
+    const timer = setTimeout(() => setLocationModalOpen(true), 400);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const load = async () => {
+      const [eventsRes, venuesRes, locationsRes] = await Promise.all([fetch('/api/events'), fetch('/api/venues'), fetch('/api/locations')]);
+      const eventsData = await eventsRes.json();
+      const venuesData = await venuesRes.json();
+      const locationsData = await locationsRes.json();
+      setEvents(eventsData.events || []);
+      setVenues((venuesData.venues || []).map((item: { id: string; name: string }) => ({ id: item.id, name: item.name })));
+      setLocations(locationsData.locations || []);
+    };
+    load();
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const filtered = useMemo(() => events.filter((event) => {
+    const cityMatch = selectedLocation ? event.city === selectedLocation : true;
+    const categoryMatch = category ? event.category === category : true;
+    const dateMatch = date ? event.startTime.slice(0, 10) === date : true;
+    return cityMatch && categoryMatch && dateMatch;
+  }), [events, selectedLocation, category, date]);
+  const categories = useMemo(() => Array.from(new Set(events.map((event) => event.category))), [events]);
+  const popularLocations = useMemo(() => locations.slice(0, 10), [locations]);
+  const filteredLocations = useMemo(() => {
+    const q = locationSearch.trim().toLowerCase();
+    if (!q) return locations;
+    return locations.filter((city) => city.toLowerCase().includes(q));
+  }, [locations, locationSearch]);
+
+  return (
+    <section className="modern-page">
+      <nav className="modern-nav">
+        <div className="logo">TicketPulse</div>
+        <div className="modern-actions">
+          <button onClick={() => setLocationModalOpen(true)} className="location-btn">
+            📍 {selectedLocation || 'Select Location'}
+          </button>
+        </div>
+      </nav>
+
+      <main className="modern-main">
+        <header className="modern-header">
+          <h1>Welcome back!</h1>
+          <p>
+            Here is what&apos;s happening in{' '}
+            <span>{selectedLocation || 'your area'}</span>
+          </p>
+        </header>
+
+        <div className="panel filters">
+          <select value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">All categories</option>
+            {categories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+          </select>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="input" />
+        </div>
+        <br></br>
+
+        <div className="modern-grid">
+          {filtered.map((event, index) => (
+            <article key={event.id} className="modern-card" style={{ animationDelay: `${index * 60}ms` }}>
+              <div className="icon-chip">{index + 1}</div>
+              <h3>{event.title}</h3>
+              <p>{event.city} • {formatDateTime(event.startTime)}</p>
+              <p>{venues.find((v) => v.id === event.venueId)?.name || event.venueId}</p>
+              <div className="card-foot">
+                <small>From ₹{event.basePrice || 1200}</small>
+                <Link className="btn" href={`/events/${event.id}`}>Book Now</Link>
+              </div>
+            </article>
+          ))}
+        </div>
+      </main>
+
+      {isLocationModalOpen && (
+        <div className="modal-root">
+          <div className="modal-backdrop" onClick={() => setLocationModalOpen(false)} />
+          <div className="modal-card pop-in">
+            <h2>Select Location</h2>
+            <input
+              className="input location-search"
+              placeholder="Search city, area or locality"
+              value={locationSearch}
+              onChange={(e) => setLocationSearch(e.target.value)}
+            />
+            <button className="location-current-btn" onClick={() => {
+              setSelectedLocation('Current Location');
+              setPreferredLocationForActiveUser('Current Location');
+              setLocationModalOpen(false);
+            }}>
+              📍 Use Current Location
+            </button>
+            <div className="location-popular-grid">
+              {popularLocations.map((city) => (
+                <button
+                  key={city}
+                  onClick={() => {
+                    setSelectedLocation(city);
+                    setPreferredLocationForActiveUser(city);
+                    setLocationModalOpen(false);
+                  }}
+                  className="location-popular-item"
+                >
+                  <span className="location-icon">🏙️</span>
+                  <span>{city}</span>
+                </button>
+              ))}
+            </div>
+            <h3 className="location-all-title">All Cities</h3>
+            <div className="location-alpha">A B C D E F G H I J K L M N O P Q R S T U V W X Y Z</div>
+            <div className="location-list-columns">
+              {filteredLocations.map((city) => (
+                <button
+                  key={`list-${city}`}
+                  onClick={() => {
+                    setSelectedLocation(city);
+                    setPreferredLocationForActiveUser(city);
+                    setLocationModalOpen(false);
+                  }}
+                  className="location-list-city"
+                >
+                  {city}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+
+============================================================
+FILE: aws-infrastructure/main.tf
+============================================================
+terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+}
+
+resource "aws_sns_topic" "notifications" {
+  name = var.sns_topic_name
+
+  tags = {
+    Application = var.application_name
+    ManagedBy   = "terraform"
+    Environment = var.environment
+  }
+}
+
+resource "aws_sqs_queue" "notifications" {
+  name                       = var.sqs_queue_name
+  visibility_timeout_seconds = var.sqs_visibility_timeout_seconds
+  message_retention_seconds  = var.sqs_message_retention_seconds
+
+  tags = {
+    Application = var.application_name
+    ManagedBy   = "terraform"
+    Environment = var.environment
+  }
+}
+
+resource "aws_sqs_queue_policy" "notifications" {
+  queue_url = aws_sqs_queue.notifications.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowSNSPublishToSQS"
+        Effect    = "Allow"
+        Principal = { Service = "sns.amazonaws.com" }
+        Action    = "sqs:SendMessage"
+        Resource  = aws_sqs_queue.notifications.arn
+        Condition = {
+          ArnEquals = {
+            "aws:SourceArn" = aws_sns_topic.notifications.arn
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_sns_topic_subscription" "sqs_subscriber" {
+  topic_arn = aws_sns_topic.notifications.arn
+  protocol  = "sqs"
+  endpoint  = aws_sqs_queue.notifications.arn
+}
+
+resource "aws_iam_user" "app_notifier" {
+  name = var.iam_user_name
+}
+
+resource "aws_iam_user_policy" "app_notifier" {
+  name = "${var.iam_user_name}-notifications-policy"
+  user = aws_iam_user.app_notifier.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "AllowPublishToNotificationTopic"
+        Effect   = "Allow"
+        Action   = ["sns:Publish"]
+        Resource = aws_sns_topic.notifications.arn
+      },
+      {
+        Sid      = "AllowConsumeFromNotificationQueue"
+        Effect   = "Allow"
+        Action   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
+        Resource = aws_sqs_queue.notifications.arn
+      }
+    ]
+  })
+}
+
+output "sns_topic_arn" {
+  value       = aws_sns_topic.notifications.arn
+  description = "SNS topic ARN for application notifications"
+}
+
+output "sqs_queue_url" {
+  value       = aws_sqs_queue.notifications.id
+  description = "SQS queue URL for application notifications"
+}
+
+output "sqs_queue_arn" {
+  value       = aws_sqs_queue.notifications.arn
+  description = "SQS queue ARN for application notifications"
+}
+
+output "iam_user_name" {
+  value       = aws_iam_user.app_notifier.name
+  description = "IAM user that can publish notifications and consume queue messages"
+}
+
+
+============================================================
+FILE: aws-infrastructure/variables.tf
+============================================================
+variable "aws_region" {
+  description = "AWS region where notification resources will be created"
+  type        = string
+  default     = "ap-south-1"
+}
+
+variable "application_name" {
+  description = "Application tag value"
+  type        = string
+  default     = "ticketpulse"
+}
+
+variable "environment" {
+  description = "Environment tag value (dev/staging/prod)"
+  type        = string
+  default     = "dev"
+}
+
+variable "sns_topic_name" {
+  description = "SNS topic name for notifications"
+  type        = string
+  default     = "Ticketpulse"
+}
+
+variable "sqs_queue_name" {
+  description = "SQS queue name for notification fan-out consumption"
+  type        = string
+  default     = "myqueus"
+}
+
+variable "sqs_visibility_timeout_seconds" {
+  description = "Visibility timeout for the SQS queue"
+  type        = number
+  default     = 30
+}
+
+variable "sqs_message_retention_seconds" {
+  description = "Message retention period for SQS queue"
+  type        = number
+  default     = 345600
+}
+
+variable "iam_user_name" {
+  description = "IAM user for application notification access"
+  type        = string
+  default     = "ticketpulse-notifier"
+}
+
+
+============================================================
+FILE: components/NavBar.tsx
+============================================================
+'use client';
+
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { getActiveUser, isSessionExpired, logoutUser, markSessionActivity } from '@/lib/clientStore';
+
+export default function NavBar() {
+  const router = useRouter();
+  const [role, setRole] = useState<string>('guest');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  useEffect(() => {
+    const syncUser = () => {
+      const user = getActiveUser();
+      setRole(user?.role || 'guest');
+      setIsLoggedIn(Boolean(user));
+    };
+    syncUser();
+    const onActivity = () => {
+      if (getActiveUser()) markSessionActivity();
+    };
+    const events: (keyof WindowEventMap)[] = ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'];
+    events.forEach((event) => window.addEventListener(event, onActivity));
+    const expiryWatcher = window.setInterval(() => {
+      if (isSessionExpired() && getActiveUser()) {
+        logoutUser();
+        syncUser();
+        router.push('/auth');
+      }
+    }, 30_000);
+    return () => {
+      events.forEach((event) => window.removeEventListener(event, onActivity));
+      window.clearInterval(expiryWatcher);
+    };
+  }, [router]);
+
+  const onLogout = () => {
+    logoutUser();
+    setRole('guest');
+    setIsLoggedIn(false);
+    router.push('/auth');
+  };
+
+  return (
+    <header className="topbar">
+      <div className="container nav-shell">
+        <Link href="/" className="brand">
+          TicketPulse
+          <span>Book Smarter, Not Harder</span>
+        </Link>
+        <nav className="navlinks">
+          <Link href="/">Events</Link>
+          {!isLoggedIn ? (
+            <Link href="/auth">Login</Link>
+          ) : (
+            <>
+              <Link href="/auth">Profile</Link>
+              <button className="btn ghost" onClick={onLogout}>Logout</button>
+              <Link href="/bookings">Bookings</Link>
+              <Link href="/notifications" aria-label="Notifications" title="Notifications">🔔</Link>
+              {role === 'admin' && <Link href="/admin">Admin Panel</Link>}
+            </>
+          )}
+        </nav>
+      </div>
+    </header>
+  );
+}
+
+
+============================================================
+FILE: components/admin/AdminPages.tsx
+============================================================
+'use client';
+
+import Link from 'next/link';
+
+const pages = [
+  '/admin',
+  '/admin/pages',
+  '/admin/venues',
+  '/admin/events',
+  '/admin/pricing',
+  '/admin/bookings',
+  '/admin/refunds',
+  '/admin/reports'
+] as const;
+
+export function AdminPagesComponent() {
+  return (
+    <section className="admin-section stack">
+      <h2>Admin Pages</h2>
+      <p>Central navigation for all admin functionalities.</p>
+      <div className="admin-card-grid two">
+        {pages.map((path) => (
+          <Link key={path} href={path} className="admin-card admin-link-card">
+            {path}
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+
+============================================================
+FILE: components/admin/Booking.tsx
+============================================================
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+
+export function BookingComponent() {
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('ALL');
+  const [bookings, setBookings] = useState<{ id: string; userId: string; eventId: string; seats: string[]; totalAmount: number; status: string }[]>([]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setError('');
+        const res = await fetch('/api/bookings?admin=1');
+        const data = res.ok ? await res.json() : { bookings: [] };
+        setBookings(data.bookings || []);
+      } catch {
+        setError('Failed to load bookings. Retrying...');
+      }
+    };
+    load();
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const filtered = useMemo(() => bookings.filter((b) =>
+    (status === 'ALL' || b.status === status)
+    && (!search || `${b.id} ${b.eventId}`.toLowerCase().includes(search.toLowerCase()))
+  ), [bookings, search, status]);
+
+  return (
+    <section className="admin-section stack">
+      <h2>Booking List Management</h2>
+      {error && <p className="muted">{error}</p>}
+      <div className="row gap-sm wrap">
+        <input className="input" placeholder="Search bookings" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <option value="ALL">All statuses</option>
+          <option value="CONFIRMED">Confirmed</option>
+          <option value="CANCELLED">Cancelled</option>
+        </select>
+      </div>
+
+      {filtered.length === 0 ? (
+        <article className="admin-card"><p>No bookings found for the selected filter.</p></article>
+      ) : (
+        <div className="booking-box-grid">
+          {filtered.map((b) => (
+            <article key={b.id} className="booking-box-card">
+              <p><strong>Booking:</strong> {b.id}</p>
+              <p><strong>User:</strong> {b.userId}</p>
+              <p><strong>Event:</strong> {b.eventId}</p>
+              <p><strong>Seats:</strong> {b.seats.join(', ')}</p>
+              <p><strong>Amount:</strong> ₹{b.totalAmount}</p>
+              <p><strong>Status:</strong> <span className={`status-badge ${b.status === 'CONFIRMED' ? 'ok' : 'warn'}`}>{b.status}</span></p>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+
+============================================================
+FILE: components/admin/Dashboard.tsx
+============================================================
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+
+export function Dashboard() {
+  const [events, setEvents] = useState<{ id: string }[]>([]);
+  const [bookings, setBookings] = useState<{ id: string; eventId: string; totalAmount: number; status: string }[]>([]);
+  const [totalUsers, setTotalUsers] = useState(0);
+
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoadError('');
+        const [eventsRes, bookingsRes, usersRes] = await Promise.all([
+          fetch('/api/events'),
+          fetch('/api/bookings?admin=1'),
+          fetch('/api/user')
+        ]);
+        const eventsData = eventsRes.ok ? await eventsRes.json() : { events: [] };
+        const bookingsData = bookingsRes.ok ? await bookingsRes.json() : { bookings: [] };
+        const usersData = usersRes.ok ? await usersRes.json() : { users: [] };
+        setEvents(eventsData.events || []);
+        setBookings(bookingsData.bookings || []);
+        setTotalUsers((usersData.users || []).length);
+      } catch {
+        setLoadError('Unable to fetch live dashboard data. Retrying automatically...');
+      }
+    };
+    load();
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const totalRevenue = useMemo(() => bookings.filter((b) => b.status === 'CONFIRMED').reduce((sum, b) => sum + b.totalAmount, 0), [bookings]);
+  const recent = bookings.slice(0, 5);
+
+  const chartData = [
+    { label: 'Events', value: events.length },
+    { label: 'Bookings', value: bookings.length },
+    { label: 'Revenue/10k', value: Math.max(1, Math.round(totalRevenue / 10000)) },
+    { label: 'Users', value: Math.max(1, totalUsers) }
+  ];
+
+  const max = Math.max(...chartData.map((x) => x.value), 1);
+
+  return (
+    <section className="admin-section stack">
+      <h2>Admin Dashboard</h2>
+      {loadError && <p className="muted">{loadError}</p>}
+      <div className="admin-card-grid four">
+        <article className="admin-card"><h3>Total Events</h3><p>{events.length}</p></article>
+        <article className="admin-card"><h3>Total Bookings</h3><p>{bookings.length}</p></article>
+        <article className="admin-card"><h3>Total Revenue</h3><p>₹{totalRevenue}</p></article>
+        <article className="admin-card"><h3>Total Users</h3><p>{totalUsers}</p></article>
+      </div>
+
+      <div className="admin-card-grid two">
+        <article className="admin-card">
+          <h3>Charts / Analytics</h3>
+          <div className="admin-chart">
+            {chartData.map((item) => (
+              <div key={item.label} className="admin-bar-wrap">
+                <div className="admin-bar" style={{ height: `${Math.max(12, (item.value / max) * 120)}px` }} />
+                <small>{item.label}</small>
+              </div>
+            ))}
+          </div>
+        </article>
+
+        <article className="admin-card">
+          <h3>Recent Activity</h3>
+          {recent.length === 0 ? <p>No recent activity.</p> : (
+            <ul className="stack">
+              {recent.map((b) => <li key={b.id}>{b.id} • {b.eventId} • {b.status}</li>)}
+            </ul>
+          )}
+        </article>
+      </div>
+    </section>
+  );
+}
+
+
+============================================================
+FILE: components/admin/Event.tsx
+============================================================
+'use client';
+
+import { FormEvent, useCallback, useEffect, useState } from 'react';
+
+type AdminEvent = { id: string; title: string; venue: string; city: string; category: string; datetime: string; description: string; pricingLink: string };
+
+export function EventComponent() {
+  const [list, setList] = useState<AdminEvent[]>([]);
+  const [venues, setVenues] = useState<{ id: string; name: string }[]>([]);
+  const [locations, setLocations] = useState<string[]>([]);
+  const [form, setForm] = useState<AdminEvent>({ id: '', title: '', venue: '', city: '', category: 'Music', datetime: '', description: '', pricingLink: '/admin/pricing' });
+  const [message, setMessage] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      setMessage('');
+      const [eventsRes, venuesRes, locationsRes] = await Promise.all([fetch('/api/events'), fetch('/api/venues'), fetch('/api/locations')]);
+      const eventsData = eventsRes.ok ? await eventsRes.json() : { events: [] };
+      const venuesData = venuesRes.ok ? await venuesRes.json() : { venues: [] };
+      const locationsData = locationsRes.ok ? await locationsRes.json() : { locations: [] };
+      const venueMap = new Map((venuesData.venues || []).map((v: { id: string; name: string }) => [v.id, v.name]));
+      const loadedVenues = (venuesData.venues || []).map((v: { id: string; name: string }) => ({ id: v.id, name: v.name }));
+      setVenues(loadedVenues);
+      setLocations(locationsData.locations || []);
+      setList((eventsData.events || []).map((e: { id: string; title: string; venueId: string; startTime: string; description: string }) => ({
+        id: e.id,
+        title: e.title,
+        venue: venueMap.get(e.venueId) || '',
+        city: (e as { city?: string }).city || '',
+        category: (e as { category?: string }).category || 'General',
+        datetime: e.startTime,
+        description: e.description,
+        pricingLink: '/admin/pricing'
+      })));
+      setForm((prev) => ({ ...prev, venue: prev.venue || loadedVenues[0]?.name || '', city: prev.city || locationsData.locations?.[0] || '' }));
+    } catch {
+      setMessage('Unable to fetch events right now. Retrying...');
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
+  }, [load]);
+
+  const onSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!form.title || !form.venue || !form.datetime || !form.description || !form.city || !form.category) {
+      setMessage('Please fill all required fields before submit.');
+      return;
+    }
+    const venueId = venues.find((v) => v.name === form.venue)?.id;
+    if (!venueId) {
+      setMessage('Please select a valid venue.');
+      return;
+    }
+
+    try {
+      if (form.id) {
+        const res = await fetch('/api/events', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update', eventId: form.id, updates: { title: form.title, category: form.category, city: form.city, description: form.description, startTime: form.datetime, venueId } })
+        });
+        if (!res.ok) throw new Error('Update failed');
+        setMessage('Event updated successfully.');
+      } else {
+        const res = await fetch('/api/events', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'create',
+            title: form.title,
+            description: form.description,
+            category: form.category,
+            startTime: form.datetime,
+            endTime: form.datetime,
+            city: form.city,
+            venueId
+          })
+        });
+        if (!res.ok) throw new Error('Create failed');
+        setMessage('Event created successfully.');
+      }
+      setForm({ id: '', title: '', venue: venues[0]?.name || '', city: locations[0] || '', category: 'Music', datetime: '', description: '', pricingLink: '/admin/pricing' });
+      await load();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Unable to save event.');
+    }
+  };
+
+  const editItem = (item: AdminEvent) => setForm(item);
+  const deleteItem = async (id: string) => {
+    const res = await fetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', eventId: id })
+    });
+    if (res.ok) setMessage('Event deleted successfully.');
+    await load();
+  };
+
+  return (
+    <section className="admin-section stack">
+      <h2>Event Creation & Management</h2>
+      {message && <p className="muted">{message}</p>}
+      <form className="admin-form event-form" onSubmit={onSubmit}>
+        <label className="stack"><span>Event name</span><input className="input" placeholder="Event name" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
+        <label className="stack"><span>Venue</span><select className="input" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })}>{venues.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}</select></label>
+        <label className="stack"><span>Location</span><select className="input" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })}>{locations.map((loc) => <option key={loc} value={loc}>{loc}</option>)}</select></label>
+        <label className="stack"><span>Category</span><input className="input" placeholder="Category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></label>
+        <label className="stack"><span>Date & time</span><input className="input" type="datetime-local" value={form.datetime} onChange={(e) => setForm({ ...form, datetime: e.target.value })} /></label>
+        <label className="stack"><span>Description</span><input className="input" placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+        <label className="stack"><span>Pricing link</span><input className="input" placeholder="Pricing link" value={form.pricingLink} onChange={(e) => setForm({ ...form, pricingLink: e.target.value })} /></label>
+        <button className="btn" type="submit">{form.id ? 'Update Event' : 'Create Event'}</button>
+      </form>
+
+      <table className="admin-table">
+        <thead><tr><th>Event name</th><th>Venue</th><th>Location</th><th>Category</th><th>Date & time</th><th>Description</th><th>Pricing link</th><th>Actions</th></tr></thead>
+        <tbody>
+          {list.map((item) => (
+            <tr key={item.id}>
+              <td>{item.title}</td><td>{item.venue}</td><td>{item.city}</td><td>{item.category}</td><td>{item.datetime}</td><td>{item.description}</td><td>{item.pricingLink}</td>
+              <td className="row gap-sm"><button className="btn ghost" type="button" onClick={() => editItem(item)}>Edit</button><button className="btn ghost" type="button" onClick={() => deleteItem(item.id)}>Delete</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+
+============================================================
+FILE: components/admin/Header.tsx
+============================================================
+'use client';
+
+import { getActiveUser } from '@/lib/clientStore';
+
+export function Header() {
+  const user = getActiveUser();
+
+  return (
+    <header className="admin-header">
+      <div>
+        <h1>TicketPulse Admin Console</h1>
+        <p>Production-ready management for operations and reporting.</p>
+      </div>
+      <div className="admin-user-pill">{user?.email || 'admin@ticketpulse.app'}</div>
+    </header>
+  );
+}
+
+
+============================================================
+FILE: components/admin/Pricing.tsx
+============================================================
+'use client';
+
+import { useEffect, useState } from 'react';
+
+type Tier = { silver: number; gold: number; vip: number };
+
+export function PricingComponent() {
+  const [events, setEvents] = useState<{ id: string; title: string; basePrice?: number }[]>([]);
+  const [pricing, setPricing] = useState<Record<string, Tier>>({});
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const load = async () => {
+    try {
+      setError('');
+      const res = await fetch('/api/events');
+      if (!res.ok) throw new Error('Failed to load events');
+      const data = await res.json();
+      const list = data.events || [];
+      setEvents(list);
+      setPricing((prev) => {
+        const next = { ...prev };
+        list.forEach((e: { id: string; basePrice?: number; pricingTiers?: Tier }) => {
+          const base = e.basePrice || 1000;
+          next[e.id] = e.pricingTiers || next[e.id] || { silver: base, gold: base + 300, vip: base + 900 };
+        });
+        return next;
+      });
+    } catch {
+      setError('Unable to load pricing data.');
+    }
+  };
+
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const update = (eventId: string, tier: keyof Tier, value: number) => {
+    setPricing((prev) => ({ ...prev, [eventId]: { ...prev[eventId], [tier]: value } }));
+  };
+
+  return (
+    <section className="admin-section stack">
+      <h2>Pricing Configuration</h2>
+      {message && <p className="muted">{message}</p>}
+      {error && <p className="muted">{error}</p>}
+      <table className="admin-table">
+        <thead><tr><th>Event</th><th>Silver</th><th>Gold</th><th>VIP</th><th>Action</th></tr></thead>
+        <tbody>
+          {events.map((event) => (
+            <tr key={event.id}>
+              <td>{event.title}</td>
+              <td><input className="input" type="number" value={pricing[event.id]?.silver ?? event.basePrice ?? 1000} onChange={(e) => update(event.id, 'silver', Number(e.target.value))} /></td>
+              <td><input className="input" type="number" value={pricing[event.id]?.gold ?? (event.basePrice ?? 1000) + 300} onChange={(e) => update(event.id, 'gold', Number(e.target.value))} /></td>
+              <td><input className="input" type="number" value={pricing[event.id]?.vip ?? (event.basePrice ?? 1000) + 900} onChange={(e) => update(event.id, 'vip', Number(e.target.value))} /></td>
+              <td><button className="btn" type="button" onClick={async () => {
+                try {
+                  setMessage('');
+                  setError('');
+                  const current = pricing[event.id];
+                  if (!current) throw new Error('No pricing loaded');
+                  const res = await fetch('/api/events', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'update', eventId: event.id, updates: { basePrice: current.silver, pricingTiers: current } })
+                  });
+                  if (!res.ok) throw new Error('Update failed');
+                  await load();
+                  setMessage(`Pricing updated for ${event.title}.`);
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : 'Pricing update failed.');
+                }
+              }}>Update Pricing</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+
+============================================================
+FILE: components/admin/Refund.tsx
+============================================================
+'use client';
+
+import { useEffect, useState } from 'react';
+
+type RefundStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export function RefundComponent() {
+  const [refundRequests, setRefundRequests] = useState<{ id: string; userId: string; totalAmount: number; status: string }[]>([]);
+  const [statusMap, setStatusMap] = useState<Record<string, RefundStatus>>(() =>
+    ({})
+  );
+  const [message, setMessage] = useState('');
+
+  const load = async () => {
+    try {
+      const res = await fetch('/api/bookings?admin=1');
+      const data = res.ok ? await res.json() : { bookings: [] };
+      const cancelled = (data.bookings || []).filter((b: { status: string }) => b.status === 'CANCELLED');
+      setRefundRequests(cancelled);
+      setStatusMap((prev) => {
+        const next = { ...prev };
+        cancelled.forEach((b: { id: string }) => { if (!next[b.id]) next[b.id] = 'PENDING'; });
+        return next;
+      });
+    } catch {
+      setMessage('Failed to load refunds. Retrying...');
+    }
+  };
+
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const update = async (id: string, status: RefundStatus, amount: number) => {
+    if (status === 'APPROVED') {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'refund', bookingId: id, amount })
+      });
+      if (!res.ok) {
+        setMessage('Refund approval failed.');
+        return;
+      }
+    }
+    setStatusMap((prev) => ({ ...prev, [id]: status }));
+    setMessage(`Refund ${status.toLowerCase()} for ${id}.`);
+  };
+
+  return (
+    <section className="admin-section stack">
+      <h2>Refund Panel</h2>
+      {message && <p className="muted">{message}</p>}
+      <table className="admin-table">
+        <thead><tr><th>Booking ID</th><th>User</th><th>Amount</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+          {refundRequests.length === 0 && <tr><td colSpan={5}>No refund requests.</td></tr>}
+          {refundRequests.map((b) => (
+            <tr key={b.id}>
+              <td>{b.id}</td><td>{b.userId}</td><td>₹{b.totalAmount}</td>
+              <td><span className={`status-badge ${statusMap[b.id] === 'APPROVED' ? 'ok' : statusMap[b.id] === 'REJECTED' ? 'warn' : ''}`}>{statusMap[b.id]}</span></td>
+              <td className="row gap-sm">
+                <button className="btn" onClick={() => update(b.id, 'APPROVED', b.totalAmount)}>Approve</button>
+                <button className="btn ghost" onClick={() => update(b.id, 'REJECTED', b.totalAmount)}>Reject</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+
+============================================================
+FILE: components/admin/Reports.tsx
+============================================================
+'use client';
+
+import { useEffect, useState } from 'react';
+
+export function ReportsComponent() {
+  const [reports, setReports] = useState({ bookingReports: 0, revenueReports: 0 });
+  const [byStatus, setByStatus] = useState({ confirmed: 0, cancelled: 0, users: 0 });
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setError('');
+        const [reportRes, bookingRes] = await Promise.all([fetch('/api/reporting'), fetch('/api/bookings?admin=1')]);
+        const reportData = reportRes.ok ? await reportRes.json() : { bookingReports: 0, revenueReports: 0 };
+        const bookingData = bookingRes.ok ? await bookingRes.json() : { bookings: [] };
+        const all = bookingData.bookings || [];
+        setReports(reportData);
+        setByStatus({
+          confirmed: all.filter((b: { status: string }) => b.status === 'CONFIRMED').length,
+          cancelled: all.filter((b: { status: string }) => b.status === 'CANCELLED').length,
+          users: new Set(all.map((b: { userId: string }) => b.userId)).size
+        });
+      } catch {
+        setError('Unable to load reports. Retrying...');
+      }
+    };
+    load();
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <section className="admin-section stack">
+      <h2>Reports Dashboard</h2>
+      {error && <p className="muted">{error}</p>}
+      <div className="admin-card-grid three">
+        <article className="admin-card"><h3>User Activity Reports</h3><p>Active users: {byStatus.users}</p></article>
+        <article className="admin-card"><h3>Booking Reports</h3><p>Confirmed: {byStatus.confirmed} • Cancelled: {byStatus.cancelled}</p></article>
+        <article className="admin-card"><h3>Revenue Reports</h3><p>Total Revenue: ₹{reports.revenueReports}</p></article>
+      </div>
+      <div className="admin-chart">
+        <div className="admin-bar-wrap"><div className="admin-bar" style={{ height: `${Math.max(14, byStatus.confirmed * 16)}px` }} /><small>Confirmed</small></div>
+        <div className="admin-bar-wrap"><div className="admin-bar" style={{ height: `${Math.max(14, byStatus.cancelled * 16)}px` }} /><small>Cancelled</small></div>
+        <div className="admin-bar-wrap"><div className="admin-bar" style={{ height: `${Math.max(14, Math.round(reports.revenueReports / 5000) * 12)}px` }} /><small>Revenue</small></div>
+      </div>
+    </section>
+  );
+}
+
+
+============================================================
+FILE: components/admin/Sidebar.tsx
+============================================================
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+
+const NAV_ITEMS = [
+  { href: '/admin', label: 'Admin Dashboard' },
+  { href: '/admin/venues', label: 'Venue Management' },
+  { href: '/admin/events', label: 'Event Creation & Management' },
+  { href: '/admin/pricing', label: 'Pricing Configuration' },
+  { href: '/admin/bookings', label: 'Booking List Management' },
+  { href: '/admin/refunds', label: 'Refund Panel' },
+  { href: '/admin/reports', label: 'Reports Dashboard' }
+] as const;
+
+export function Sidebar() {
+  const pathname = usePathname();
+
+  return (
+    <aside className="admin-sidebar">
+      <h2>Admin Pages</h2>
+      <nav>
+        {NAV_ITEMS.map((item) => (
+          <Link key={item.href} href={item.href} className={`admin-nav-item ${pathname === item.href ? 'active' : ''}`}>
+            {item.label}
+          </Link>
+        ))}
+      </nav>
+    </aside>
+  );
+}
+
+
+============================================================
+FILE: components/admin/Venue.tsx
+============================================================
+'use client';
+
+import { FormEvent, useEffect, useState } from 'react';
+
+type Venue = { id: string; name: string; city: string; capacity: number };
+
+export function VenueComponent() {
+  const [venues, setVenues] = useState<Venue[]>([]);
+  const [events, setEvents] = useState<{ id: string; title: string }[]>([]);
+  const [locations, setLocations] = useState<string[]>([]);
+  const [newLocation, setNewLocation] = useState('');
+  const [form, setForm] = useState({ id: '', name: '', city: '', capacity: '' });
+  const [layoutForm, setLayoutForm] = useState({ eventId: '', rows: '4', cols: '8', vipRows: '1', regularPrice: '1200', vipPrice: '2200' });
+  const [layoutSeats, setLayoutSeats] = useState<{ id: string; category: string; status: string }[]>([]);
+  const [message, setMessage] = useState('');
+
+  const loadVenues = async () => {
+    try {
+      const [venueRes, eventRes, locationRes] = await Promise.all([fetch('/api/venues'), fetch('/api/events'), fetch('/api/locations')]);
+      const venueData = venueRes.ok ? await venueRes.json() : { venues: [] };
+      const eventData = eventRes.ok ? await eventRes.json() : { events: [] };
+      const locationData = locationRes.ok ? await locationRes.json() : { locations: [] };
+      setVenues(venueData.venues || []);
+      setEvents((eventData.events || []).map((item: { id: string; title: string }) => ({ id: item.id, title: item.title })));
+      setLocations(locationData.locations || []);
+      setForm((prev) => ({ ...prev, city: prev.city || locationData.locations?.[0] || '' }));
+    } catch {
+      setMessage('Failed to load venue/event data. Retrying...');
+    }
+  };
+
+  useEffect(() => {
+    loadVenues();
+    const timer = setInterval(loadVenues, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const onSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!form.name || !form.city || !form.capacity) return;
+    try {
+      if (form.id) {
+        const res = await fetch('/api/venues', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update', venueId: form.id, updates: { name: form.name, city: form.city, capacity: Number(form.capacity) } })
+        });
+        if (!res.ok) throw new Error('Venue update failed');
+        setMessage('Venue updated successfully.');
+      } else {
+        const res = await fetch('/api/venues', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'create', name: form.name, city: form.city, capacity: Number(form.capacity) })
+        });
+        if (!res.ok) throw new Error('Venue create failed');
+        setMessage('Venue created successfully.');
+      }
+      setForm({ id: '', name: '', city: '', capacity: '' });
+      await loadVenues();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Unable to save venue');
+    }
+  };
+
+  const editVenue = (venue: Venue) => setForm({ id: venue.id, name: venue.name, city: venue.city, capacity: String(venue.capacity) });
+  const deleteVenue = async (id: string) => {
+    const res = await fetch('/api/venues', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', venueId: id })
+    });
+    if (res.ok) setMessage('Venue deleted successfully.');
+    await loadVenues();
+  };
+
+  const loadLayout = async (eventId: string) => {
+    if (!eventId) return;
+    const response = await fetch('/api/venues', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'seat-layout', eventId })
+    });
+    const data = await response.json();
+    setLayoutSeats(data.seats || []);
+  };
+
+  const saveLayout = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!layoutForm.eventId) return;
+    const response = await fetch('/api/venues', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update-seat-layout', ...layoutForm })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setMessage(data.error || 'Failed to update seat layout.');
+      return;
+    }
+    setLayoutSeats(data.seats || []);
+    setMessage('Seat layout updated and saved successfully.');
+  };
+
+  return (
+    <section className="admin-section stack">
+      <h2>Venue Management</h2>
+      {message && <p className="muted">{message}</p>}
+      <form className="admin-form" onSubmit={onSubmit}>
+        <input className="input" placeholder="Venue name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        <select className="input" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })}>
+          {locations.map((location) => <option key={location} value={location}>{location}</option>)}
+        </select>
+        <input className="input" placeholder="Capacity" type="number" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
+        <button className="btn" type="submit">{form.id ? 'Update Venue' : 'Add Venue'}</button>
+      </form>
+      <div className="row gap-sm wrap">
+        <input className="input" placeholder="Add new location" value={newLocation} onChange={(e) => setNewLocation(e.target.value)} />
+        <button className="btn" type="button" onClick={async () => {
+          if (!newLocation.trim()) return;
+          const res = await fetch('/api/locations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ city: newLocation.trim() }) });
+          if (res.ok) {
+            const data = await res.json();
+            setLocations(data.locations || []);
+            setForm((prev) => ({ ...prev, city: newLocation.trim() }));
+            setNewLocation('');
+            setMessage('Location added successfully.');
+          }
+        }}>Add Location</button>
+      </div>
+
+      <table className="admin-table">
+        <thead><tr><th>Name</th><th>City</th><th>Capacity</th><th>Actions</th></tr></thead>
+        <tbody>
+          {venues.map((venue) => (
+            <tr key={venue.id}>
+              <td>{venue.name}</td><td>{venue.city}</td><td>{venue.capacity}</td>
+              <td className="row gap-sm"><button className="btn ghost" type="button" onClick={() => editVenue(venue)}>Edit</button><button className="btn ghost" type="button" onClick={() => deleteVenue(venue.id)}>Delete</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <article className="admin-card stack">
+        <h3>Seat Layout Editing (Per Event)</h3>
+        <p className="muted">Step 1: choose event. Step 2: set rows/columns and prices. Step 3: click save.</p>
+        <form className="admin-form seat-layout-form" onSubmit={saveLayout}>
+          <label className="stack"><span>Event</span><select
+            className="input"
+            value={layoutForm.eventId}
+            onChange={async (e) => {
+              const eventId = e.target.value;
+              setLayoutForm({ ...layoutForm, eventId });
+              await loadLayout(eventId);
+            }}
+          >
+            <option value="">Select event</option>
+            {events.map((event) => <option key={event.id} value={event.id}>{event.title}</option>)}
+          </select></label>
+          <label className="stack"><span>Rows</span><input className="input" type="number" min={1} value={layoutForm.rows} onChange={(e) => setLayoutForm({ ...layoutForm, rows: e.target.value })} /></label>
+          <label className="stack"><span>Columns</span><input className="input" type="number" min={1} value={layoutForm.cols} onChange={(e) => setLayoutForm({ ...layoutForm, cols: e.target.value })} /></label>
+          <label className="stack"><span>VIP rows</span><input className="input" type="number" min={0} value={layoutForm.vipRows} onChange={(e) => setLayoutForm({ ...layoutForm, vipRows: e.target.value })} /></label>
+          <label className="stack"><span>Regular price</span><input className="input" type="number" min={1} value={layoutForm.regularPrice} onChange={(e) => setLayoutForm({ ...layoutForm, regularPrice: e.target.value })} /></label>
+          <label className="stack"><span>VIP price</span><input className="input" type="number" min={1} value={layoutForm.vipPrice} onChange={(e) => setLayoutForm({ ...layoutForm, vipPrice: e.target.value })} /></label>
+          <button className="btn" type="submit">Save Seat Layout</button>
+        </form>
+
+        <div className="seat-grid">
+          {layoutSeats.map((seat) => (
+            <div key={seat.id} className={`seat-cell ${seat.category === 'VIP' ? 'vip' : ''}`}>
+              <span>{seat.id}</span>
+              <small>{seat.category}</small>
+            </div>
+          ))}
+        </div>
+      </article>
+    </section>
+  );
+}
+
+
+============================================================
+FILE: docker-compose.yml
+============================================================
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.4
+    container_name: ticketpulse-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.4
+    container_name: ticketpulse-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  ticketpulse-web:
+    build:
+      context: .
+      target: dev
+    container_name: ticketpulse-web
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
+      KAFKA_BROKERS: kafka:9092
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      SNS_TOPIC_ARN: ${SNS_TOPIC_ARN:-arn:aws:sns:ap-south-1:478122456633:Ticketpulse}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-https://sqs.ap-south-1.amazonaws.com/478122456633/myqueus}
+      AUTH_SERVICE_URL: http://ticketpulse-auth:3101
+      USER_SERVICE_URL: http://ticketpulse-user:3102
+      EVENTS_SERVICE_URL: http://ticketpulse-events:3103
+      VENUES_SERVICE_URL: http://ticketpulse-venues:3104
+      INVENTORY_SERVICE_URL: http://ticketpulse-inventory:3105
+      BOOKINGS_SERVICE_URL: http://ticketpulse-bookings:3106
+      PAYMENTS_SERVICE_URL: http://ticketpulse-payments:3107
+      NOTIFICATIONS_SERVICE_URL: http://ticketpulse-notifications:3108
+      SEARCH_SERVICE_URL: http://ticketpulse-search:3109
+      ADMIN_SERVICE_URL: http://ticketpulse-admin:3110
+      REPORTING_SERVICE_URL: http://ticketpulse-reporting:3111
+      STORAGE_SERVICE_URL: http://ticketpulse-storage:3112
+    depends_on:
+      - ticketpulse-auth
+      - ticketpulse-user
+      - ticketpulse-events
+      - ticketpulse-venues
+      - ticketpulse-inventory
+      - ticketpulse-bookings
+      - ticketpulse-payments
+      - ticketpulse-notifications
+      - ticketpulse-search
+      - ticketpulse-admin
+      - ticketpulse-reporting
+      - ticketpulse-storage
+    command: npm run dev -- -H 0.0.0.0 -p 3000
+
+  ticketpulse-auth:
+    build:
+      context: .
+      target: dev
+    container_name: ticketpulse-auth
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      SNS_TOPIC_ARN: ${SNS_TOPIC_ARN:-arn:aws:sns:ap-south-1:478122456633:Ticketpulse}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-https://sqs.ap-south-1.amazonaws.com/478122456633/myqueus}
+    command: npm run dev -- -H 0.0.0.0 -p 3101
+
+  ticketpulse-user:
+    build:
+      context: .
+      target: dev
+    container_name: ticketpulse-user
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+    command: npm run dev -- -H 0.0.0.0 -p 3102
+
+  ticketpulse-events:
+    build:
+      context: .
+      target: dev
+    container_name: ticketpulse-events
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+    command: npm run dev -- -H 0.0.0.0 -p 3103
+
+  ticketpulse-venues:
+    build:
+      context: .
+      target: dev
+    container_name: ticketpulse-venues
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+    command: npm run dev -- -H 0.0.0.0 -p 3104
+
+  ticketpulse-inventory:
+    build:
+      context: .
+      target: dev
+    container_name: ticketpulse-inventory
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+    command: npm run dev -- -H 0.0.0.0 -p 3105
+
+  ticketpulse-bookings:
+    build:
+      context: .
+      target: dev
+    container_name: ticketpulse-bookings
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      SNS_TOPIC_ARN: ${SNS_TOPIC_ARN:-arn:aws:sns:ap-south-1:478122456633:Ticketpulse}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-https://sqs.ap-south-1.amazonaws.com/478122456633/myqueus}
+    command: npm run dev -- -H 0.0.0.0 -p 3106
+
+  ticketpulse-payments:
+    build:
+      context: .
+      target: dev
+    container_name: ticketpulse-payments
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      SNS_TOPIC_ARN: ${SNS_TOPIC_ARN:-arn:aws:sns:ap-south-1:478122456633:Ticketpulse}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-https://sqs.ap-south-1.amazonaws.com/478122456633/myqueus}
+    command: npm run dev -- -H 0.0.0.0 -p 3107
+
+  ticketpulse-notifications:
+    build:
+      context: .
+      target: dev
+    container_name: ticketpulse-notifications
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      SNS_TOPIC_ARN: ${SNS_TOPIC_ARN:-arn:aws:sns:ap-south-1:478122456633:Ticketpulse}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-https://sqs.ap-south-1.amazonaws.com/478122456633/myqueus}
+    command: npm run dev -- -H 0.0.0.0 -p 3108
+
+  ticketpulse-search:
+    build:
+      context: .
+      target: dev
+    container_name: ticketpulse-search
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+    command: npm run dev -- -H 0.0.0.0 -p 3109
+
+  ticketpulse-admin:
+    build:
+      context: .
+      target: dev
+    container_name: ticketpulse-admin
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+    command: npm run dev -- -H 0.0.0.0 -p 3110
+
+  ticketpulse-reporting:
+    build:
+      context: .
+      target: dev
+    container_name: ticketpulse-reporting
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+    command: npm run dev -- -H 0.0.0.0 -p 3111
+
+  ticketpulse-storage:
+    build:
+      context: .
+      target: dev
+    container_name: ticketpulse-storage
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+    command: npm run dev -- -H 0.0.0.0 -p 3112
+
+  ticketpulse-worker:
+    build:
+      context: .
+      target: dev
+    container_name: ticketpulse-worker
+    depends_on:
+      - kafka
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      NODE_ENV: development
+      KAFKA_BROKERS: kafka:9092
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      SNS_TOPIC_ARN: ${SNS_TOPIC_ARN:-arn:aws:sns:ap-south-1:478122456633:Ticketpulse}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-https://sqs.ap-south-1.amazonaws.com/478122456633/myqueus}
+    command: npm run worker
+
+
+============================================================
+FILE: lib/aws.ts
+============================================================
+export type NotificationType = 'booking' | 'payment' | 'refund';
+const runtimeImport = async <T>(name: string) => (new Function('n', 'return import(n)')(name) as Promise<T>);
+
+async function getSnsClient() {
+  const mod = await runtimeImport<{ SNSClient: new (config: unknown) => unknown }>('@aws-sdk/client-sns');
+  return new mod.SNSClient({
+    region: process.env.AWS_REGION,
+    credentials: process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+      ? {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+        }
+      : undefined
+  }) as { send: (cmd: unknown) => Promise<unknown> };
+}
+
+async function getSqsClient() {
+  const mod = await runtimeImport<{ SQSClient: new (config: unknown) => unknown }>('@aws-sdk/client-sqs');
+  return new mod.SQSClient({
+    region: process.env.AWS_REGION,
+    credentials: process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+      ? {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+        }
+      : undefined
+  }) as { send: (cmd: unknown) => Promise<{ Messages?: { Body?: string; ReceiptHandle?: string }[] }> };
+}
+
+export async function publishSnsNotification(payload: { type: NotificationType; userId: string; message: string; timestamp: string; extra?: Record<string, unknown> }) {
+  const topicArn = process.env.SNS_TOPIC_ARN;
+  if (!topicArn) {
+    console.warn('[aws] SNS_TOPIC_ARN not configured');
+    return { sent: false, queued: false };
+  }
+
+  try {
+    const mod = await runtimeImport<{ PublishCommand: new (input: unknown) => unknown }>('@aws-sdk/client-sns');
+    const sns = await getSnsClient();
+    await sns.send(new mod.PublishCommand({
+      TopicArn: topicArn,
+      Message: JSON.stringify(payload)
+    }));
+    const queueResult = await pushNotificationToQueue(payload);
+    return { sent: true, queued: queueResult.queued };
+  } catch (error) {
+    console.error('[aws] SNS publish failed', error);
+    throw error;
+  }
+}
+
+export async function sendOtpSms(phoneNumber: string, otpCode: string) {
+  try {
+    const mod = await runtimeImport<{ PublishCommand: new (input: unknown) => unknown }>('@aws-sdk/client-sns');
+    const sns = await getSnsClient();
+    await sns.send(new mod.PublishCommand({
+      PhoneNumber: phoneNumber,
+      Message: `Your TicketPulse OTP is ${otpCode}. Valid for 5 minutes.`
+    }));
+    return { sent: true };
+  } catch (error) {
+    console.error('[aws] OTP SMS publish failed', error);
+    const err = error as Error & { name?: string };
+    return { sent: false, error: err.message, code: err.name || 'SNSPublishError' };
+  }
+}
+
+export async function pushOtpAuditToQueue(payload: Record<string, unknown>) {
+  const queueUrl = process.env.SQS_QUEUE_URL;
+  if (!queueUrl) return { queued: false, reason: 'queue url missing' };
+  try {
+    const sqsMod = await runtimeImport<{ SendMessageCommand: new (input: unknown) => unknown }>('@aws-sdk/client-sqs');
+    const sqs = await getSqsClient();
+    await sqs.send(new sqsMod.SendMessageCommand({
+      QueueUrl: queueUrl,
+      MessageBody: JSON.stringify(payload)
+    }));
+    return { queued: true };
+  } catch (error) {
+    console.error('[aws] OTP SQS enqueue failed', error);
+    return { queued: false, error: (error as Error).message };
+  }
+}
+
+async function pushNotificationToQueue(payload: Record<string, unknown>) {
+  return pushOtpAuditToQueue({ kind: 'notification', ...payload });
+}
+
+export async function consumeSqsMessages(handler: (body: string) => Promise<void>, retries = 3) {
+  const queueUrl = process.env.SQS_QUEUE_URL;
+  if (!queueUrl) {
+    console.warn('[aws] SQS_QUEUE_URL not configured');
+    return;
+  }
+
+  const sqsMod = await runtimeImport<{ ReceiveMessageCommand: new (input: unknown) => unknown; DeleteMessageCommand: new (input: unknown) => unknown }>('@aws-sdk/client-sqs');
+  const sqs = await getSqsClient();
+  const response = await sqs.send(new sqsMod.ReceiveMessageCommand({ QueueUrl: queueUrl, MaxNumberOfMessages: 10, WaitTimeSeconds: 10 }));
+
+  for (const message of response.Messages || []) {
+    let attempt = 0;
+    while (attempt < retries) {
+      attempt += 1;
+      try {
+        await handler(message.Body || '');
+        if (message.ReceiptHandle) {
+          await sqs.send(new sqsMod.DeleteMessageCommand({ QueueUrl: queueUrl, ReceiptHandle: message.ReceiptHandle }));
+        }
+        break;
+      } catch (error) {
+        console.error(`[aws] SQS handler failed attempt ${attempt}`, error);
+        if (attempt >= retries) throw error;
+      }
+    }
+  }
+}
+
+
+============================================================
+FILE: lib/clientStore.ts
+============================================================
+export type AppUser = { id: string; name: string; email: string; phone?: string; role: 'customer' | 'admin'; otpVerifiedAt: number | null };
+export type BookingRecord = {
+  id: string;
+  userId: string;
+  userEmail: string;
+  eventId: string;
+  eventTitle: string;
+  seats: string[];
+  amount: number;
+  status: 'CONFIRMED' | 'CANCELLED';
+  qr: string;
+  createdAt: number;
+  cancellable: boolean;
+  s3Assets?: { ticketPdfUrl: string; qrImageUrl: string; invoiceUrl: string; logsUrl: string };
+};
+
+const USERS_KEY = 'tp:users';
+const ACTIVE_USER_KEY = 'tp:active-user';
+const BOOKINGS_KEY = 'tp:bookings';
+const NOTIFICATION_KEY = 'tp:notifications';
+const LOCATION_BY_USER_KEY = 'tp:location-by-user';
+const OTP_STATE_KEY = 'tp:otp-state';
+const SESSION_LAST_ACTIVE_KEY = 'tp:session-last-active';
+export const BOOKING_CANCEL_WINDOW_MS = 5 * 60 * 1000;
+export const SESSION_TIMEOUT_MS = 60 * 60 * 1000;
+
+function readJson<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback;
+  const raw = localStorage.getItem(key);
+  return raw ? (JSON.parse(raw) as T) : fallback;
+}
+
+function writeJson<T>(key: string, value: T): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function seedUsers(users: AppUser[]) {
+  const gmailUsers = users.filter((user) => user.email.toLowerCase().endsWith('@gmail.com')).map((user) => ({
+    ...user,
+    otpVerifiedAt: user.otpVerifiedAt || null
+  }));
+  if (gmailUsers.length !== users.length) {
+    writeJson(USERS_KEY, gmailUsers);
+  }
+  return gmailUsers;
+}
+
+function isValidGmail(email: string): boolean {
+  return /^[^\s@]+@gmail\.com$/i.test(email.trim());
+}
+
+function getOtpState() {
+  return readJson<{ [email: string]: { code: string; expiresAt: number } }>(OTP_STATE_KEY, {});
+}
+
+function setOtpState(state: { [email: string]: { code: string; expiresAt: number } }) {
+  writeJson(OTP_STATE_KEY, state);
+}
+
+export function requestOtp(email: string): { ok: boolean; error?: string; otpCode?: string } {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!isValidGmail(cleanEmail)) return { ok: false, error: 'Only Gmail addresses are allowed.' };
+  const code = `${Math.floor(100000 + Math.random() * 900000)}`;
+  const state = getOtpState();
+  state[cleanEmail] = { code, expiresAt: Date.now() + 5 * 60 * 1000 };
+  setOtpState(state);
+  return { ok: true, otpCode: code };
+}
+
+function verifyOtp(email: string, otp: string): { ok: boolean; error?: string } {
+  const cleanEmail = email.trim().toLowerCase();
+  const state = getOtpState();
+  const match = state[cleanEmail];
+  if (!match) return { ok: false, error: 'OTP not requested. Please request OTP.' };
+  if (Date.now() > match.expiresAt) return { ok: false, error: 'OTP expired. Please request again.' };
+  if (match.code !== otp.trim()) return { ok: false, error: 'Invalid OTP code.' };
+  delete state[cleanEmail];
+  setOtpState(state);
+  return { ok: true };
+}
+
+export function registerUser(name: string, email: string, otp: string, role: AppUser['role'] = 'customer'): { user?: AppUser; error?: string } {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!isValidGmail(cleanEmail)) return { error: 'Signup requires your original Gmail ID.' };
+  const users = seedUsers(readJson<AppUser[]>(USERS_KEY, []));
+  const existing = users.find((user) => user.email.toLowerCase() === cleanEmail);
+  if (existing) return { error: 'Email already registered. Please login.' };
+  const otpStatus = verifyOtp(cleanEmail, otp);
+  if (!otpStatus.ok) return { error: otpStatus.error };
+  const nextUser: AppUser = { id: `U-${Date.now()}`, name: name.trim(), email: cleanEmail, role, otpVerifiedAt: Date.now() };
+  writeJson(USERS_KEY, [...users, nextUser]);
+  writeJson(ACTIVE_USER_KEY, nextUser);
+  markSessionActivity();
+  return { user: nextUser };
+}
+
+export function loginUser(email: string, otp: string): { user?: AppUser; error?: string } {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!isValidGmail(cleanEmail)) return { error: 'Login requires a valid Gmail ID.' };
+  const users = seedUsers(readJson<AppUser[]>(USERS_KEY, []));
+  const existing = users.find((user) => user.email.toLowerCase() === cleanEmail);
+  if (!existing) return { error: 'User not found. Please sign up first.' };
+  const otpStatus = verifyOtp(cleanEmail, otp);
+  if (!otpStatus.ok) return { error: otpStatus.error };
+  const verifiedUser = { ...existing, otpVerifiedAt: existing.otpVerifiedAt || Date.now() };
+  const nextUsers = users.map((user) => user.id === verifiedUser.id ? verifiedUser : user);
+  writeJson(USERS_KEY, nextUsers);
+  writeJson(ACTIVE_USER_KEY, verifiedUser);
+  markSessionActivity();
+  return { user: verifiedUser };
+}
+
+export function getActiveUser(): AppUser | null {
+  const active = readJson<AppUser | null>(ACTIVE_USER_KEY, null);
+  if (!active) return null;
+  if (isSessionExpired()) {
+    logoutUser();
+    return null;
+  }
+  return active;
+}
+
+export function logoutUser(): void {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(ACTIVE_USER_KEY);
+  localStorage.removeItem(SESSION_LAST_ACTIVE_KEY);
+}
+
+export function setActiveUser(user: AppUser): void {
+  writeJson(ACTIVE_USER_KEY, user);
+  markSessionActivity();
+}
+
+export function markSessionActivity(): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(SESSION_LAST_ACTIVE_KEY, String(Date.now()));
+}
+
+export function isSessionExpired(): boolean {
+  if (typeof window === 'undefined') return false;
+  const raw = localStorage.getItem(SESSION_LAST_ACTIVE_KEY);
+  if (!raw) return true;
+  return Date.now() - Number(raw) > SESSION_TIMEOUT_MS;
+}
+
+export function saveBooking(booking: BookingRecord): void {
+  const list = readJson<BookingRecord[]>(BOOKINGS_KEY, []);
+  const duplicate = list.find((item) => item.id === booking.id);
+  if (duplicate) return;
+  writeJson(BOOKINGS_KEY, [booking, ...list]);
+}
+
+export function getBookings(): BookingRecord[] {
+  return readJson<BookingRecord[]>(BOOKINGS_KEY, []);
+}
+
+export function getBookingsForUser(userId: string): BookingRecord[] {
+  return getBookings().filter((booking) => booking.userId === userId);
+}
+
+export function canCancelBooking(createdAt: number): boolean {
+  return Date.now() - createdAt <= BOOKING_CANCEL_WINDOW_MS;
+}
+
+export function cancelBooking(bookingId: string): { ok: boolean; error?: string } {
+  const list = readJson<BookingRecord[]>(BOOKINGS_KEY, []);
+  const target = list.find((booking) => booking.id === bookingId);
+  if (!target) return { ok: false, error: 'Booking not found.' };
+  if (!canCancelBooking(target.createdAt)) return { ok: false, error: 'Cancellation is only allowed within 5 minutes of booking.' };
+  const next = list.map((booking) => booking.id === bookingId ? { ...booking, status: 'CANCELLED' as const, cancellable: false } : booking);
+  writeJson(BOOKINGS_KEY, next);
+  return { ok: true };
+}
+
+export function setPreferredLocationForActiveUser(city: string): void {
+  const user = getActiveUser();
+  if (!user || !city) return;
+  const map = readJson<Record<string, string>>(LOCATION_BY_USER_KEY, {});
+  map[user.id] = city;
+  writeJson(LOCATION_BY_USER_KEY, map);
+}
+
+export function getPreferredLocationForActiveUser(): string {
+  const user = getActiveUser();
+  if (!user) return '';
+  const map = readJson<Record<string, string>>(LOCATION_BY_USER_KEY, {});
+  return map[user.id] ?? '';
+}
+
+export function pushNotification(message: string, channel: 'EMAIL' | 'SMS' | 'PUSH'): void {
+  const current = readJson<{ id: string; message: string; channel: string; ts: number }[]>(NOTIFICATION_KEY, []);
+  current.unshift({ id: `N-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, message, channel, ts: Date.now() });
+  writeJson(NOTIFICATION_KEY, current.slice(0, 30));
+}
+
+export function getNotifications() {
+  return readJson<{ id: string; message: string; channel: string; ts: number }[]>(NOTIFICATION_KEY, []);
+}
+
+
+============================================================
+FILE: lib/db.ts
+============================================================
+import fs from 'fs';
+import path from 'path';
+
+const DATA_DIR = path.join(process.cwd(), '.data');
+const DATA_FILE = path.join(DATA_DIR, 'service-state.json');
+
+export function loadDbState<T>(fallback: T): T {
+  try {
+    if (!fs.existsSync(DATA_FILE)) return fallback;
+    const raw = fs.readFileSync(DATA_FILE, 'utf8');
+    return JSON.parse(raw) as T;
+  } catch (error) {
+    console.error('[db] load failed, using fallback', error);
+    return fallback;
+  }
+}
+
+export function saveDbState(state: unknown): void {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(DATA_FILE, JSON.stringify(state, null, 2), 'utf8');
+  } catch (error) {
+    console.error('[db] save failed', error);
+  }
+}
+
+export function logOperation(scope: string, message: string, meta?: Record<string, unknown>) {
+  console.log(`[${scope}] ${message}`, meta || {});
+}
+
+
+============================================================
+FILE: lib/format.ts
+============================================================
+export function formatDateTime(value: string | number) {
+  return new Intl.DateTimeFormat('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Asia/Kolkata'
+  }).format(new Date(value));
+}
+
+
+============================================================
+FILE: lib/kafka.ts
+============================================================
+const TOPICS = ['event.created', 'event.updated', 'booking.confirmed', 'booking.cancelled', 'payment.completed'] as const;
+
+type TopicName = typeof TOPICS[number];
+
+let producerRef: { send: (payload: unknown) => Promise<unknown> } | null = null;
+const runtimeImport = async <T>(name: string) => (new Function('n', 'return import(n)')(name) as Promise<T>);
+
+async function initProducerWithRetry(retries = 3): Promise<{ send: (payload: unknown) => Promise<unknown> } | null> {
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    try {
+      const mod = await runtimeImport<{ Kafka: new (...args: unknown[]) => { producer: (opts: unknown) => { connect: () => Promise<void>; send: (payload: unknown) => Promise<unknown> } } }>('kafkajs');
+      const kafka = new mod.Kafka({
+        clientId: process.env.KAFKA_CLIENT_ID || 'ticketpulse-api',
+        brokers: (process.env.KAFKA_BROKERS || 'localhost:9092').split(',')
+      });
+      const producer = kafka.producer({ allowAutoTopicCreation: true });
+      await producer.connect();
+      return producer;
+    } catch (error) {
+      console.error(`[kafka] producer connect attempt ${attempt} failed`, error);
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+    }
+  }
+  return null;
+}
+
+export async function getKafkaProducer() {
+  if (!producerRef) producerRef = await initProducerWithRetry();
+  return producerRef;
+}
+
+export async function publishKafkaEvent(topic: TopicName, data: { eventId?: string; bookingId?: string; payload: Record<string, unknown> }) {
+  if (!TOPICS.includes(topic)) throw new Error(`Unsupported topic: ${topic}`);
+
+  const message = {
+    ...data,
+    timestamp: new Date().toISOString()
+  };
+
+  const producer = await getKafkaProducer();
+  if (!producer) {
+    console.warn('[kafka] producer unavailable, message skipped', { topic, message });
+    return { queued: false };
+  }
+
+  try {
+    await producer.send({
+      topic,
+      messages: [{ value: JSON.stringify(message) }]
+    });
+    return { queued: true };
+  } catch (error) {
+    console.error('[kafka] publish failed', { topic, error });
+    throw error;
+  }
+}
+
+export { TOPICS };
+
+
+============================================================
+FILE: lib/mockData.ts
+============================================================
+export const events = [
+  {
+    id: 'ev1',
+    title: 'Neon Nights Concert',
+    city: 'Bengaluru',
+    category: 'Music',
+    venue: 'SkyDome Arena',
+    datetime: '2026-05-10T19:30:00Z',
+    basePrice: 1200,
+    venueLayout: 'Main floor + Balcony. Gates open 6:15 PM.'
+  },
+  {
+    id: 'ev2',
+    title: 'Standup Live: The Roast Room',
+    city: 'Mumbai',
+    category: 'Comedy',
+    venue: 'Laugh Factory Hall',
+    datetime: '2026-05-20T18:30:00Z',
+    basePrice: 800,
+    venueLayout: 'Single hall theater seating. Doors open 5:45 PM.'
+  },
+  {
+    id: 'ev3',
+    title: 'AI Product Summit 2026',
+    city: 'Hyderabad',
+    category: 'Tech',
+    venue: 'TechPark Convention Center',
+    datetime: '2026-06-02T09:30:00Z',
+    basePrice: 2200,
+    venueLayout: 'Expo section + keynote arena + workshop wings.'
+  }
+];
+
+export const venueCatalog = [
+  { id: 'v1', name: 'SkyDome Arena', city: 'Bengaluru', capacity: 1800 },
+  { id: 'v2', name: 'Laugh Factory Hall', city: 'Mumbai', capacity: 620 },
+  { id: 'v3', name: 'TechPark Convention Center', city: 'Hyderabad', capacity: 2400 }
+];
+
+export const seatLayout: Record<string, { id: string; label: string; status: 'AVAILABLE' | 'BOOKED' | 'BLOCKED' }[]> = {
+  ev1: generateSeats('A', 32),
+  ev2: generateSeats('B', 40),
+  ev3: generateSeats('C', 36)
+};
+
+function generateSeats(prefix: string, total: number): { id: string; label: string; status: 'AVAILABLE' | 'BOOKED' | 'BLOCKED' }[] {
+  return Array.from({ length: total }).map((_, i) => ({
+    id: `${prefix}${i + 1}`,
+    label: `${prefix}${i + 1}`,
+    status: i % 13 === 0 ? 'BOOKED' : 'AVAILABLE'
+  }));
+}
+
+
+============================================================
+FILE: lib/otpSql.ts
+============================================================
+import fs from 'fs';
+import path from 'path';
+
+type OtpRow = { otp_code: string; expires_at: number };
+const memoryOtp = new Map<string, OtpRow>();
+
+const DATA_DIR = path.join(process.cwd(), '.data');
+const DB_FILE = path.join(DATA_DIR, 'otp.sqlite');
+
+function getDb() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    const sqlite = require('node:sqlite') as { DatabaseSync: new (file: string) => { exec: (sql: string) => void; prepare: (sql: string) => { run: (...params: unknown[]) => void; get: (...params: unknown[]) => OtpRow | undefined } } };
+    const db = new sqlite.DatabaseSync(DB_FILE);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS otp_codes (
+        phone TEXT PRIMARY KEY,
+        otp_code TEXT NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+    `);
+    return db;
+  } catch {
+    return null;
+  }
+}
+
+export function saveOtpForPhone(phone: string, otpCode: string, expiresAt: number): void {
+  const db = getDb();
+  if (db) {
+    db.prepare('INSERT OR REPLACE INTO otp_codes(phone, otp_code, expires_at) VALUES (?, ?, ?)').run(phone, otpCode, expiresAt);
+    return;
+  }
+  memoryOtp.set(phone, { otp_code: otpCode, expires_at: expiresAt });
+}
+
+export function verifyPhoneOtp(phone: string, otpCode: string): { ok: boolean; reason?: string } {
+  const db = getDb();
+  const row = db
+    ? db.prepare('SELECT otp_code, expires_at FROM otp_codes WHERE phone = ?').get(phone)
+    : memoryOtp.get(phone);
+  if (!row) return { ok: false, reason: 'OTP not requested' };
+  if (Date.now() > row.expires_at) return { ok: false, reason: 'OTP expired' };
+  if (row.otp_code !== otpCode) return { ok: false, reason: 'Invalid OTP' };
+  if (db) db.prepare('DELETE FROM otp_codes WHERE phone = ?').run(phone);
+  memoryOtp.delete(phone);
+  return { ok: true };
+}
+
+export function clearPhoneOtp(phone: string): void {
+  const db = getDb();
+  if (db) db.prepare('DELETE FROM otp_codes WHERE phone = ?').run(phone);
+  memoryOtp.delete(phone);
+}
+
+
+============================================================
+FILE: lib/s3Config.ts
+============================================================
+export type StorageAssetType = 'ticketPdf' | 'qrImage' | 'eventBanner' | 'invoice' | 'logArchive';
+
+const region = process.env.AWS_REGION || 'ap-south-1';
+const bucket = process.env.S3_BUCKET_NAME || 'mohan12324234';
+
+const prefixes: Record<StorageAssetType, string> = {
+  ticketPdf: process.env.S3_PREFIX_TICKETS || 'tickets',
+  qrImage: process.env.S3_PREFIX_QR || 'qr',
+  eventBanner: process.env.S3_PREFIX_BANNERS || 'banners',
+  invoice: process.env.S3_PREFIX_INVOICES || 'invoices',
+  logArchive: process.env.S3_PREFIX_LOGS || 'logs'
+};
+
+export function getS3Config() {
+  return { region, bucket, prefixes };
+}
+
+export function buildS3Key(type: StorageAssetType, fileName: string) {
+  return `${prefixes[type]}/${fileName}`;
+}
+
+export function buildS3Url(type: StorageAssetType, fileName: string) {
+  const key = buildS3Key(type, fileName);
+  return `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+}
+
+
+============================================================
+FILE: lib/s3Upload.ts
+============================================================
+import crypto from 'crypto';
+
+function hmac(key: Buffer | string, data: string) {
+  return crypto.createHmac('sha256', key).update(data, 'utf8').digest();
+}
+
+function hash(value: string | Buffer) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function getSignatureKey(secretKey: string, dateStamp: string, region: string, service: string) {
+  const kDate = hmac(`AWS4${secretKey}`, dateStamp);
+  const kRegion = hmac(kDate, region);
+  const kService = hmac(kRegion, service);
+  return hmac(kService, 'aws4_request');
+}
+
+export async function putObjectToS3({
+  region,
+  bucket,
+  key,
+  body,
+  contentType
+}: {
+  region: string;
+  bucket: string;
+  key: string;
+  body: string | Buffer;
+  contentType: string;
+}) {
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+  if (!accessKeyId || !secretAccessKey) {
+    throw new Error('Missing AWS credentials in environment. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.');
+  }
+
+  const host = `${bucket}.s3.${region}.amazonaws.com`;
+  const endpoint = `https://${host}/${key}`;
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+  const payloadHash = hash(body);
+
+  const canonicalHeaders = `content-type:${contentType}\nhost:${host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
+  const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
+  const canonicalRequest = `PUT\n/${key}\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+  const credentialScope = `${dateStamp}/${region}/s3/aws4_request`;
+  const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${credentialScope}\n${hash(canonicalRequest)}`;
+  const signingKey = getSignatureKey(secretAccessKey, dateStamp, region, 's3');
+  const signature = crypto.createHmac('sha256', signingKey).update(stringToSign, 'utf8').digest('hex');
+
+  const authorizationHeader = `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  const response = await fetch(endpoint, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': contentType,
+      'x-amz-date': amzDate,
+      'x-amz-content-sha256': payloadHash,
+      Authorization: authorizationHeader
+    },
+    body
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`S3 upload failed (${response.status}): ${text.slice(0, 300)}`);
+  }
+
+  return endpoint;
+}
+
+
+============================================================
+FILE: lib/serviceState.ts
+============================================================
+export type SeatState = 'AVAILABLE' | 'HELD' | 'BOOKED' | 'BLOCKED';
+export type BookingStatus = 'PENDING' | 'PAYMENT_IN_PROGRESS' | 'CONFIRMED' | 'FAILED' | 'CANCELLED' | 'REFUNDED' | 'EXPIRED';
+import { loadDbState, logOperation, saveDbState } from '@/lib/db';
+
+export const gatewayState = {
+  requests: [] as { path: string; method: string; ts: number; ip: string }[],
+  rateLimit: new Map<string, { count: number; resetAt: number }>()
+};
+
+const defaultState = {
+  locations: ['Bengaluru', 'Mumbai', 'Hyderabad', 'New York', 'Dubai'],
+  users: [
+    {
+      id: 'admin-default',
+      name: 'Admin User',
+      email: 'admin@ticketpulse.app',
+      phone: '+919999999999',
+      role: 'admin',
+      cityPreference: 'Bengaluru',
+      passwordHash: 'hashed-admin123',
+      createdAt: Date.now(),
+      otpVerifiedAt: Date.now()
+    }
+  ] as { id: string; name: string; email: string; phone: string; role: string; cityPreference: string; passwordHash: string; createdAt: number; otpVerifiedAt?: number }[],
+  events: [
+    {
+      id: 'ev1',
+      title: 'Neon Nights Concert',
+      description: 'EDM live concert',
+      category: 'Music',
+      language: 'English',
+      bannerUrl: 'banners/ev1.jpg',
+      startTime: '2026-05-10T19:30:00Z',
+      endTime: '2026-05-10T22:30:00Z',
+      city: 'Bengaluru',
+      venueId: 'v1',
+      status: 'PUBLISHED',
+      organizerId: 'org1',
+      ageRestriction: '16+',
+      cancellationPolicy: '24h before show'
+    }
+  ],
+  venues: [
+    { id: 'v1', name: 'SkyDome Arena', city: 'Bengaluru', address: 'Central Ave', capacity: 1800, hall: 'Hall-A', categories: ['VIP', 'Regular'] }
+  ],
+  seats: {
+    ev1: Array.from({ length: 24 }).map((_, i) => ({ id: `A${i + 1}`, rowLabel: 'A', seatNumber: `${i + 1}`, category: i < 4 ? 'VIP' : 'Regular', price: i < 4 ? 2200 : 1200, status: i % 12 === 0 ? 'BOOKED' : 'AVAILABLE' as SeatState, holdToken: '', holdExpiry: 0 }))
+  } as Record<string, { id: string; rowLabel: string; seatNumber: string; category: string; price: number; status: SeatState; holdToken: string; holdExpiry: number }[]>,
+  bookings: [] as { id: string; userId: string; eventId: string; seats: string[]; totalAmount: number; status: BookingStatus; createdAt: number }[],
+  payments: [] as { id: string; bookingId: string; provider: string; providerRef: string; status: string; amount: number; idempotencyKey: string; createdAt: number }[],
+  notifications: [] as { id: string; userId: string; type: string; status: string; payload: string; sentAt: number }[],
+  coupons: [] as { code: string; discountPct: number; active: boolean }[],
+  refunds: [] as { id: string; bookingId: string; paymentId?: string; amount: number; status: string }[]
+};
+
+export const serviceState = loadDbState(defaultState);
+
+export function json(data: unknown, status = 200, extraHeaders?: Record<string, string>) {
+  return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', ...extraHeaders } });
+}
+
+export function createId(prefix: string) {
+  return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function hashPassword(password: string) {
+  return `hashed-${Buffer.from(password).toString('base64')}`;
+}
+
+export function persistServiceState(scope: string, meta?: Record<string, unknown>) {
+  saveDbState(serviceState as unknown as Record<string, unknown>);
+  logOperation(scope, 'state persisted', meta);
+}
+
+
+============================================================
+FILE: next-env.d.ts
+============================================================
+/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/basic-features/typescript for more information.
+
+
+============================================================
+FILE: next.config.mjs
+============================================================
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  experimental: {
+    typedRoutes: true
+  }
+};
+
+export default nextConfig;
+
+
+============================================================
+FILE: package.json
+============================================================
+{
+  "name": "myapp2.0",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "worker": "node --require ts-node/register workers/consumer.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sns": "^3.821.0",
+    "@aws-sdk/client-sqs": "^3.821.0",
+    "kafkajs": "^2.2.4",
+    "next": "14.2.5",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2",
+    "typescript": "5.5.4",
+    "@types/node": "20.14.12",
+    "@types/react": "18.3.3",
+    "@types/react-dom": "18.3.0",
+    "eslint": "8.57.0",
+    "eslint-config-next": "14.2.5"
+  }
+}
+
+
+============================================================
+FILE: tsconfig.json
+============================================================
+{
+  "compilerOptions": {
+    "target": "es2017",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
+
+============================================================
+FILE: workers/consumer.ts
+============================================================
+import { TOPICS } from '@/lib/kafka';
+import { consumeSqsMessages } from '@/lib/aws';
+const runtimeImport = async <T>(name: string) => (new Function('n', 'return import(n)')(name) as Promise<T>);
+
+async function runKafkaConsumer() {
+  try {
+    const mod = await runtimeImport<{ Kafka: new (config: unknown) => { consumer: (config: unknown) => { connect: () => Promise<void>; subscribe: (config: unknown) => Promise<void>; run: (config: unknown) => Promise<void> } } }>('kafkajs');
+    const kafka = new mod.Kafka({
+      clientId: process.env.KAFKA_CONSUMER_CLIENT_ID || 'ticketpulse-consumer',
+      brokers: (process.env.KAFKA_BROKERS || 'localhost:9092').split(',')
+    });
+    const consumer = kafka.consumer({ groupId: process.env.KAFKA_CONSUMER_GROUP || 'ticketpulse-group' });
+
+    await consumer.connect();
+    for (const topic of TOPICS) {
+      await consumer.subscribe({ topic, fromBeginning: false });
+    }
+
+    await consumer.run({
+      eachMessage: async ({ topic, message }: { topic: string; message: { value?: { toString: () => string } } }) => {
+        const value = message.value?.toString() || '';
+        console.log('[worker:kafka] consumed', { topic, value });
+      }
+    });
+  } catch (error) {
+    console.error('[worker:kafka] consumer failed', error);
+    setTimeout(runKafkaConsumer, 2000);
+  }
+}
+
+async function runSqsConsumer() {
+  try {
+    await consumeSqsMessages(async (body) => {
+      console.log('[worker:sqs] consumed', body);
+    });
+  } catch (error) {
+    console.error('[worker:sqs] poll failed', error);
+  } finally {
+    setTimeout(runSqsConsumer, 3000);
+  }
+}
+
+runKafkaConsumer();
+runSqsConsumer();
+
+
