@@ -1,0 +1,90 @@
+TicketPulse UI Screenshots Document
+Generated on 2026-04-15 (UTC)
+
+This document organizes the requested screenshots with proper titles in presentation order.
+
+====================================================================
+1) Home Page — Location Selection Modal
+====================================================================
+Title: Home | Select Location Modal
+Screenshot: Provided by user (Image 1)
+Notes: Displays city search, current location action, featured city cards, and A–Z city list.
+
+
+====================================================================
+2) Home Page — Main Event Listing
+====================================================================
+Title: Home | Welcome & Event Cards
+Screenshot: Provided by user (Image 2)
+Notes: Displays location-aware welcome banner, category/date filters, and event card with booking CTA.
+
+
+====================================================================
+3) Authentication — Sign Up Form
+====================================================================
+Title: Auth | Sign Up with OTP
+Screenshot: Provided by user (Image 3)
+Notes: Displays full name/email/phone fields, OTP input + Send OTP action, Sign up and Switch to Login actions.
+
+
+====================================================================
+4) Admin — Dashboard Overview
+====================================================================
+Title: Admin | Dashboard
+Screenshot: Provided by user (Image 4)
+Notes: Displays metrics cards, charts/analytics area, and recent activity panel.
+
+
+====================================================================
+5) Admin — Venue Management
+====================================================================
+Title: Admin | Venue Management
+Screenshot: Provided by user (Image 5)
+Notes: Displays venue creation form, location addition controls, venue list table, and seat layout editor.
+
+
+====================================================================
+6) Admin — Event Creation & Management
+====================================================================
+Title: Admin | Event Creation & Management
+Screenshot: Provided by user (Image 6)
+Notes: Displays event form and events table with edit/delete actions.
+
+
+====================================================================
+7) Admin — Pricing Configuration
+====================================================================
+Title: Admin | Pricing Configuration
+Screenshot: Provided by user (Image 7)
+Notes: Displays event-wise tier pricing (Silver/Gold/VIP) and update pricing actions.
+
+
+====================================================================
+8) Admin — Booking List Management
+====================================================================
+Title: Admin | Booking List Management
+Screenshot: Provided by user (Image 8)
+Notes: Displays search/filter controls and booking cards with seat, amount, and status details.
+
+
+====================================================================
+9) Admin — Refund Panel
+====================================================================
+Title: Admin | Refund Panel
+Screenshot: Provided by user (Image 9)
+Notes: Displays refunds table and empty-state messaging for no refund requests.
+
+
+====================================================================
+10) Admin — Reports Dashboard
+====================================================================
+Title: Admin | Reports Dashboard
+Screenshot: Provided by user (Image 10)
+Notes: Displays user activity, booking, and revenue summaries with chart area.
+
+
+====================================================================
+Appendix
+====================================================================
+- The screenshot visuals were supplied in the review thread.
+- This Word-compatible .doc file provides structured titles and captions for each screenshot.
