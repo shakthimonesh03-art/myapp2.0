@@ -3,85 +3,85 @@ name: 'Terraform'
 on:
   push:
     branches:
-    - main
+      - main
   pull_request:
 
 jobs:
   terraform-plan:
     name: 'Terraform Plan'
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-
+    
     steps:
-    - name: Checkout
-      uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Detect changes in terraform-infra folder
-      id: changes
-      uses: dorny/paths-filter@v2
-      with:
-        filters: |
-          terraform:
-            - 'terraform-infra/**'
+      - name: Detect changes in terraform-infra folder
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            terraform:
+              - 'terraform-infra/**'
 
-    - name: Configure AWS credentials
-      if: steps.changes.outputs.terraform == 'true'
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ap-south-1
+      - name: Configure AWS credentials
+        if: steps.changes.outputs.terraform == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
 
-    - name: Setup Terraform
-      if: steps.changes.outputs.terraform == 'true'
-      uses: hashicorp/setup-terraform@v1
+      - name: Setup Terraform
+        if: steps.changes.outputs.terraform == 'true'
+        uses: hashicorp/setup-terraform@v3
 
-    - name: Terraform Init
-      if: steps.changes.outputs.terraform == 'true'
-      run: terraform init
-      working-directory: ./terraform-infra
+      - name: Terraform Init
+        if: steps.changes.outputs.terraform == 'true'
+        run: terraform init
+        working-directory: ./terraform-infra
 
-    - name: Terraform Plan
-      if: steps.changes.outputs.terraform == 'true'
-      run: terraform plan
-      working-directory: ./terraform-infra
+      - name: Terraform Plan
+        if: steps.changes.outputs.terraform == 'true'
+        run: terraform plan -no-color
+        working-directory: ./terraform-infra
 
   deploy:
     name: 'Deploy'
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    # Run only on a push to the main branch
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: [terraform-plan]
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Detect changes in terraform-infra folder
-      id: changes
-      uses: dorny/paths-filter@v2
-      with:
-        filters: |
-          terraform:
-            - 'terraform-infra/**'
+      - name: Detect changes in terraform-infra folder
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            terraform:
+              - 'terraform-infra/**'
 
-    - name: Configure AWS credentials
-      if: steps.changes.outputs.terraform == 'true'
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ap-south-1
+      - name: Configure AWS credentials
+        if: steps.changes.outputs.terraform == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
 
-    - name: Setup Terraform
-      if: steps.changes.outputs.terraform == 'true'
-      uses: hashicorp/setup-terraform@v1
+      - name: Setup Terraform
+        if: steps.changes.outputs.terraform == 'true'
+        uses: hashicorp/setup-terraform@v3
 
-    - name: Terraform Init
-      if: steps.changes.outputs.terraform == 'true'
-      run: terraform init
-      working-directory: ./terraform-infra
+      - name: Terraform Init
+        if: steps.changes.outputs.terraform == 'true'
+        run: terraform init
+        working-directory: ./terraform-infra
 
-    - name: Terraform Apply
-      if: steps.changes.outputs.terraform == 'true'
-      run: terraform apply -auto-approve
-      working-directory: ./terraform-infra
+      - name: Terraform Apply
+        if: steps.changes.outputs.terraform == 'true'
+        run: terraform apply -auto-approve
+        working-directory: ./terraform-infra
