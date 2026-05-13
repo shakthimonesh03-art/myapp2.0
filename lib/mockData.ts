@@ -1,4 +1,16 @@
-export const events = [
+export type EventCard = {
+  id: string;
+  title: string;
+  city: string;
+  category: string;
+  venue: string;
+  datetime: string;
+  basePrice: number;
+  venueLayout: string;
+  imageUrl: string;
+};
+
+export const events: EventCard[] = [
   {
     id: 'ev1',
     title: 'Neon Nights Concert',
@@ -6,8 +18,9 @@ export const events = [
     category: 'Music',
     venue: 'SkyDome Arena',
     datetime: '2026-05-10T19:30:00Z',
-    basePrice: 1200,
-    venueLayout: 'Main floor + Balcony. Gates open 6:15 PM.'
+    basePrice: 5,
+    venueLayout: 'Main floor + Balcony. Gates open 6:15 PM.',
+    imageUrl: 'https://unsplash.com/photos/QOajY0MNp8Y/download?force=true&w=1600'
   },
   {
     id: 'ev2',
@@ -16,8 +29,9 @@ export const events = [
     category: 'Comedy',
     venue: 'Laugh Factory Hall',
     datetime: '2026-05-20T18:30:00Z',
-    basePrice: 800,
-    venueLayout: 'Single hall theater seating. Doors open 5:45 PM.'
+    basePrice: 5,
+    venueLayout: 'Single hall theater seating. Doors open 5:45 PM.',
+    imageUrl: 'https://unsplash.com/photos/ugRPTKqcNyU/download?force=true&w=1600'
   },
   {
     id: 'ev3',
@@ -26,8 +40,9 @@ export const events = [
     category: 'Tech',
     venue: 'TechPark Convention Center',
     datetime: '2026-06-02T09:30:00Z',
-    basePrice: 2200,
-    venueLayout: 'Expo section + keynote arena + workshop wings.'
+    basePrice: 5,
+    venueLayout: 'Expo section + keynote arena + workshop wings.',
+    imageUrl: 'https://unsplash.com/photos/AsxOJcsaR4g/download?force=true&w=1600'
   }
 ];
 

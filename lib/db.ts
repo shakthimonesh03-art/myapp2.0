@@ -1,29 +1,46 @@
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
+import type { AppState } from './serviceState';
 
-const DATA_DIR = path.join(process.cwd(), '.data');
-const DATA_FILE = path.join(DATA_DIR, 'service-state.json');
+const dataDir = path.join(process.cwd(), 'data');
+const dbPath = path.join(dataDir, 'db.json');
 
-export function loadDbState<T>(fallback: T): T {
+/**
+ * Writes the current appState to the db.json file synchronously.
+ * This is a blocking operation, but ensures data integrity for this simple file-based DB.
+ */
+export function writeDbSync(state: AppState) {
   try {
-    if (!fs.existsSync(DATA_FILE)) return fallback;
-    const raw = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(raw) as T;
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    const data = JSON.stringify(state, null, 2);
+    fs.writeFileSync(dbPath, data, 'utf-8');
   } catch (error) {
-    console.error('[db] load failed, using fallback', error);
-    return fallback;
+    console.error('FATAL: Error writing to db.json:', error);
   }
 }
 
-export function saveDbState(state: unknown): void {
+/**
+ * Reads the state from db.json synchronously.
+ * If the file doesn't exist or is invalid, it returns null.
+ * @returns {AppState | null} The parsed state from the DB file or null.
+ */
+export function readDbSync(): AppState | null {
   try {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(DATA_FILE, JSON.stringify(state, null, 2), 'utf8');
+    if (fs.existsSync(dbPath)) {
+      const rawData = fs.readFileSync(dbPath, 'utf-8');
+      // Basic validation: if the file is empty or just '{}', treat as invalid.
+      if (rawData && rawData.length > 2) {
+        const parsed = JSON.parse(rawData) as AppState;
+        // More validation: check for a key property that should always exist.
+        if (parsed && parsed.seats && parsed.users) {
+          return parsed;
+        }
+      }
+    }
   } catch (error) {
-    console.error('[db] save failed', error);
+    console.error('Error reading from db.json:', error);
   }
-}
-
-export function logOperation(scope: string, message: string, meta?: Record<string, unknown>) {
-  console.log(`[${scope}] ${message}`, meta || {});
+  return null;
 }

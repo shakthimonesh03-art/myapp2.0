@@ -1,8 +1,6 @@
-export type AppUser = { id: string; name: string; email: string; phone?: string; role: 'customer' | 'admin'; otpVerifiedAt: number | null };
+export type AppUser = { id: string; name: string; email: string; password: string; role: 'customer' | 'admin' };
 export type BookingRecord = {
   id: string;
-  userId: string;
-  userEmail: string;
   eventId: string;
   eventTitle: string;
   seats: string[];
@@ -18,11 +16,6 @@ const USERS_KEY = 'tp:users';
 const ACTIVE_USER_KEY = 'tp:active-user';
 const BOOKINGS_KEY = 'tp:bookings';
 const NOTIFICATION_KEY = 'tp:notifications';
-const LOCATION_BY_USER_KEY = 'tp:location-by-user';
-const OTP_STATE_KEY = 'tp:otp-state';
-const SESSION_LAST_ACTIVE_KEY = 'tp:session-last-active';
-export const BOOKING_CANCEL_WINDOW_MS = 5 * 60 * 1000;
-export const SESSION_TIMEOUT_MS = 60 * 60 * 1000;
 
 function readJson<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
@@ -36,118 +29,94 @@ function writeJson<T>(key: string, value: T): void {
 }
 
 function seedUsers(users: AppUser[]) {
-  const gmailUsers = users.filter((user) => user.email.toLowerCase().endsWith('@gmail.com')).map((user) => ({
-    ...user,
-    otpVerifiedAt: user.otpVerifiedAt || null
-  }));
-  if (gmailUsers.length !== users.length) {
-    writeJson(USERS_KEY, gmailUsers);
-  }
-  return gmailUsers;
+  if (users.length) return users;
+  const adminUser: AppUser = { id: 'U-ADMIN', name: 'Platform Admin', email: 'admin@ticketpulse.app', password: 'admin123', role: 'admin' };
+  writeJson(USERS_KEY, [adminUser]);
+  return [adminUser];
 }
 
-function isValidGmail(email: string): boolean {
-  return /^[^\s@]+@gmail\.com$/i.test(email.trim());
-}
-
-function getOtpState() {
-  return readJson<{ [email: string]: { code: string; expiresAt: number } }>(OTP_STATE_KEY, {});
-}
-
-function setOtpState(state: { [email: string]: { code: string; expiresAt: number } }) {
-  writeJson(OTP_STATE_KEY, state);
-}
-
-export function requestOtp(email: string): { ok: boolean; error?: string; otpCode?: string } {
+export function registerUser(name: string, email: string, password: string, role: AppUser['role'] = 'customer'): { user?: AppUser; error?: string } {
   const cleanEmail = email.trim().toLowerCase();
-  if (!isValidGmail(cleanEmail)) return { ok: false, error: 'Only Gmail addresses are allowed.' };
-  const code = `${Math.floor(100000 + Math.random() * 900000)}`;
-  const state = getOtpState();
-  state[cleanEmail] = { code, expiresAt: Date.now() + 5 * 60 * 1000 };
-  setOtpState(state);
-  return { ok: true, otpCode: code };
-}
-
-function verifyOtp(email: string, otp: string): { ok: boolean; error?: string } {
-  const cleanEmail = email.trim().toLowerCase();
-  const state = getOtpState();
-  const match = state[cleanEmail];
-  if (!match) return { ok: false, error: 'OTP not requested. Please request OTP.' };
-  if (Date.now() > match.expiresAt) return { ok: false, error: 'OTP expired. Please request again.' };
-  if (match.code !== otp.trim()) return { ok: false, error: 'Invalid OTP code.' };
-  delete state[cleanEmail];
-  setOtpState(state);
-  return { ok: true };
-}
-
-export function registerUser(name: string, email: string, otp: string, role: AppUser['role'] = 'customer'): { user?: AppUser; error?: string } {
-  const cleanEmail = email.trim().toLowerCase();
-  if (!isValidGmail(cleanEmail)) return { error: 'Signup requires your original Gmail ID.' };
   const users = seedUsers(readJson<AppUser[]>(USERS_KEY, []));
   const existing = users.find((user) => user.email.toLowerCase() === cleanEmail);
   if (existing) return { error: 'Email already registered. Please login.' };
-  const otpStatus = verifyOtp(cleanEmail, otp);
-  if (!otpStatus.ok) return { error: otpStatus.error };
-  const nextUser: AppUser = { id: `U-${Date.now()}`, name: name.trim(), email: cleanEmail, role, otpVerifiedAt: Date.now() };
+  const nextUser: AppUser = { id: `U-${Date.now()}`, name: name.trim(), email: cleanEmail, password, role };
   writeJson(USERS_KEY, [...users, nextUser]);
   writeJson(ACTIVE_USER_KEY, nextUser);
-  markSessionActivity();
   return { user: nextUser };
 }
 
-export function loginUser(email: string, otp: string): { user?: AppUser; error?: string } {
+export function isEmailRegistered(email: string): boolean {
   const cleanEmail = email.trim().toLowerCase();
-  if (!isValidGmail(cleanEmail)) return { error: 'Login requires a valid Gmail ID.' };
+  const users = seedUsers(readJson<AppUser[]>(USERS_KEY, []));
+  return users.some((user) => user.email.toLowerCase() === cleanEmail);
+}
+
+export function loginUser(email: string, password: string): { user?: AppUser; error?: string } {
+  const cleanEmail = email.trim().toLowerCase();
   const users = seedUsers(readJson<AppUser[]>(USERS_KEY, []));
   const existing = users.find((user) => user.email.toLowerCase() === cleanEmail);
   if (!existing) return { error: 'User not found. Please sign up first.' };
-  const otpStatus = verifyOtp(cleanEmail, otp);
-  if (!otpStatus.ok) return { error: otpStatus.error };
-  const verifiedUser = { ...existing, otpVerifiedAt: existing.otpVerifiedAt || Date.now() };
-  const nextUsers = users.map((user) => user.id === verifiedUser.id ? verifiedUser : user);
+  if (!existing.password || existing.password !== password) return { error: 'Invalid password.' };
+  writeJson(ACTIVE_USER_KEY, existing);
+  return { user: existing };
+}
+
+export function updateUserName(userId: string, nextName: string): { user?: AppUser; error?: string } {
+  const cleanName = nextName.trim();
+  if (!cleanName) return { error: 'Name is required.' };
+
+  const users = seedUsers(readJson<AppUser[]>(USERS_KEY, []));
+  const index = users.findIndex((user) => user.id === userId);
+  if (index === -1) return { error: 'User not found.' };
+
+  const updatedUser: AppUser = { ...users[index], name: cleanName };
+  const nextUsers = [...users];
+  nextUsers[index] = updatedUser;
   writeJson(USERS_KEY, nextUsers);
-  writeJson(ACTIVE_USER_KEY, verifiedUser);
-  markSessionActivity();
-  return { user: verifiedUser };
+
+  const activeUser = readJson<AppUser | null>(ACTIVE_USER_KEY, null);
+  if (activeUser?.id === updatedUser.id) {
+    writeJson(ACTIVE_USER_KEY, updatedUser);
+  }
+
+  return { user: updatedUser };
+}
+
+export function updateUserPassword(email: string, nextPassword: string): { user?: AppUser; error?: string } {
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanPassword = nextPassword.trim();
+  if (!cleanEmail) return { error: 'Email is required.' };
+  if (!cleanPassword) return { error: 'New password is required.' };
+
+  const users = seedUsers(readJson<AppUser[]>(USERS_KEY, []));
+  const index = users.findIndex((user) => user.email.toLowerCase() === cleanEmail);
+  if (index === -1) return { error: 'User not found. Please sign up first.' };
+
+  const updatedUser: AppUser = { ...users[index], password: cleanPassword };
+  const nextUsers = [...users];
+  nextUsers[index] = updatedUser;
+  writeJson(USERS_KEY, nextUsers);
+
+  const activeUser = readJson<AppUser | null>(ACTIVE_USER_KEY, null);
+  if (activeUser?.id === updatedUser.id) {
+    writeJson(ACTIVE_USER_KEY, updatedUser);
+  }
+
+  return { user: updatedUser };
 }
 
 export function getActiveUser(): AppUser | null {
-  const active = readJson<AppUser | null>(ACTIVE_USER_KEY, null);
-  if (!active) return null;
-  if (isSessionExpired()) {
-    logoutUser();
-    return null;
-  }
-  return active;
+  return readJson<AppUser | null>(ACTIVE_USER_KEY, null);
 }
 
 export function logoutUser(): void {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(ACTIVE_USER_KEY);
-  localStorage.removeItem(SESSION_LAST_ACTIVE_KEY);
-}
-
-export function setActiveUser(user: AppUser): void {
-  writeJson(ACTIVE_USER_KEY, user);
-  markSessionActivity();
-}
-
-export function markSessionActivity(): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(SESSION_LAST_ACTIVE_KEY, String(Date.now()));
-}
-
-export function isSessionExpired(): boolean {
-  if (typeof window === 'undefined') return false;
-  const raw = localStorage.getItem(SESSION_LAST_ACTIVE_KEY);
-  if (!raw) return true;
-  return Date.now() - Number(raw) > SESSION_TIMEOUT_MS;
 }
 
 export function saveBooking(booking: BookingRecord): void {
   const list = readJson<BookingRecord[]>(BOOKINGS_KEY, []);
-  const duplicate = list.find((item) => item.id === booking.id);
-  if (duplicate) return;
   writeJson(BOOKINGS_KEY, [booking, ...list]);
 }
 
@@ -155,37 +124,10 @@ export function getBookings(): BookingRecord[] {
   return readJson<BookingRecord[]>(BOOKINGS_KEY, []);
 }
 
-export function getBookingsForUser(userId: string): BookingRecord[] {
-  return getBookings().filter((booking) => booking.userId === userId);
-}
-
-export function canCancelBooking(createdAt: number): boolean {
-  return Date.now() - createdAt <= BOOKING_CANCEL_WINDOW_MS;
-}
-
-export function cancelBooking(bookingId: string): { ok: boolean; error?: string } {
+export function cancelBooking(bookingId: string): void {
   const list = readJson<BookingRecord[]>(BOOKINGS_KEY, []);
-  const target = list.find((booking) => booking.id === bookingId);
-  if (!target) return { ok: false, error: 'Booking not found.' };
-  if (!canCancelBooking(target.createdAt)) return { ok: false, error: 'Cancellation is only allowed within 5 minutes of booking.' };
-  const next = list.map((booking) => booking.id === bookingId ? { ...booking, status: 'CANCELLED' as const, cancellable: false } : booking);
+  const next = list.map((booking) => booking.id === bookingId ? { ...booking, status: 'CANCELLED' as const } : booking);
   writeJson(BOOKINGS_KEY, next);
-  return { ok: true };
-}
-
-export function setPreferredLocationForActiveUser(city: string): void {
-  const user = getActiveUser();
-  if (!user || !city) return;
-  const map = readJson<Record<string, string>>(LOCATION_BY_USER_KEY, {});
-  map[user.id] = city;
-  writeJson(LOCATION_BY_USER_KEY, map);
-}
-
-export function getPreferredLocationForActiveUser(): string {
-  const user = getActiveUser();
-  if (!user) return '';
-  const map = readJson<Record<string, string>>(LOCATION_BY_USER_KEY, {});
-  return map[user.id] ?? '';
 }
 
 export function pushNotification(message: string, channel: 'EMAIL' | 'SMS' | 'PUSH'): void {
