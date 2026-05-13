@@ -1,105 +1,89 @@
-# TicketPulse MVP (Real-time Ticket Booking Prototype)
+# TicketPulse MVP (Single App Service)
 
-Interactive MVP of an event ticket platform covering customer + admin journeys.
+Interactive MVP of an event ticket platform covering customer and admin journeys.
 
-## UI
-- Modern modal-driven homepage with location selector
-- Same modern curvy-box visual style applied to booking, notifications (alerts), and admin pages
-- Razorpay UPI style checkout experience in booking flow with S3 upload call for QR SVG + ticket PDF
+## Architecture
+- `app`: one Next.js application service that owns all API routes under `/api/*`
+- `db`: PostgreSQL service exposed through `DATABASE_URL`
+- `redis`: Redis service exposed through `REDIS_URL`
+- `/api/gateway/{domain}/...` is kept as a legacy compatibility proxy and now returns `X-Legacy-Gateway: deprecated`
+- `/api/health` reports the app status and checks TCP reachability for the `db` and `redis` services
 
-## Core services implemented (mock microservices)
-- API Gateway: `/api/gateway/{service}/...`
-  - service routing
-  - bearer token validation for protected services
-  - rate limiting / throttling
-  - request logging
-  - CORS headers
-  - API version check (`v1`)
-- Auth Service: `/api/auth`
-  - signup, login, refresh token, forgot-password
-  - RBAC role field support (`customer`, `event organizer`, `admin`, `support`)
-  - mock password hashing helper
-- User Service: `/api/user`
-  - profile, booking history, preferences/city
-- Event Service: `/api/events`
-  - create, update, publish/unpublish
-  - event metadata fields
-- Venue Service: `/api/venues`
-  - venue create/list and seat-layout retrieval
-- Inventory Service: `/api/inventory`
-  - seat states (`AVAILABLE`, `HELD`, `BOOKED`, `BLOCKED`)
-  - hold / release / block / book
-- Booking Service: `/api/bookings`
-  - create, status updates, cancellation/refund-initiation
-  - booking status lifecycle fields
-- Payment Service: `/api/payments`
-  - Razorpay-style idempotent payment processing
-- Notification Service: `/api/notifications`
-  - typed notifications payload records
-- Search Service: `/api/search`
-  - search by city/date/category/query with price range filters
-- Admin Service: `/api/admin`
-  - venue/event creation, coupons, refunds, sales monitor view
-- Reporting Service: `/api/reporting`
-  - booking/revenue/occupancy/top-events/failed-payment/refund reports
-- Storage helper: `/api/storage`
+## API domains inside the single app service
+- Auth: `/api/auth`
+- User: `/api/user`
+- Events: `/api/events`
+- Venues: `/api/venues`
+- Inventory: `/api/inventory`
+- Bookings: `/api/bookings`
+- Payments: `/api/payments`
+- Notifications: `/api/notifications`
+- Search: `/api/search`
+- Admin: `/api/admin`
+- Reporting: `/api/reporting`
+- Storage: `/api/storage`
 
-## Data model (mock)
-In-memory structures include Users, Events, Venues, Seats, Bookings, Payments, Notifications, Refunds, Coupons with fields aligned to the requested design.
+## Runtime note
+The current MVP still uses in-memory application state for demo data, but the Docker topology is now a single app service with dedicated Redis and PostgreSQL dependency services.
 
-## S3 storage configuration
-Asset path helper support for:
-- ticket PDFs
-- QR images
-- event banners
-- invoices
-- logs archive
+## Environment
+Copy `.env.example` to `.env`, then fill in your AWS credentials so storage uploads can reach S3.
 
-Set env vars (or rely on defaults):
 ```bash
+APP_ARCHITECTURE=single-service
+DATABASE_URL=postgresql://ticketpulse:ticketpulse@db:5432/ticketpulse
+REDIS_URL=redis://redis:6379
 AWS_REGION=ap-south-1
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
 S3_BUCKET_NAME=mohan12324234
 S3_PREFIX_TICKETS=tickets
 S3_PREFIX_QR=qr
 S3_PREFIX_BANNERS=banners
 S3_PREFIX_INVOICES=invoices
 S3_PREFIX_LOGS=logs
+PINGRAM_API_KEY=pingram_sk_your_secret_key
+PINGRAM_REGION=us
+PINGRAM_SENDER_NAME=TicketPulse
+# Optional for development. Leave empty to use Pingram-managed sender identity.
+PINGRAM_SENDER_EMAIL=
+PINGRAM_OTP_NOTIFICATION_TYPE=signup_otp
+SIGNUP_OTP_EXPIRY_MINUTES=10
+SIGNUP_OTP_MAX_ATTEMPTS=5
 ```
 
-## Secrets and environment variables (recommended)
-- Do **not** commit real credentials in `.env`.
-- Use `.env.example` only as a template of required keys.
-- For GitHub-based deployments, store sensitive values in:
-  - **Settings → Secrets and variables → Actions** (for GitHub Actions)
-  - **Settings → Secrets and variables → Dependabot/Codespaces** when relevant
-- Suggested repository secrets for this project:
-  - `AWS_ACCESS_KEY_ID`
-  - `AWS_SECRET_ACCESS_KEY`
-  - `AWS_REGION`
-  - `SNS_TOPIC_ARN`
-  - `SQS_QUEUE_URL`
-
-If you run with Docker Compose locally, create a private `.env` file in the repo root (ignored by git) and set those values there.
+For signup OTP email delivery, configure `PINGRAM_API_KEY`.
+`PINGRAM_SENDER_EMAIL` is optional in development.
+From `app.pingram.io` API Keys screen, use only the **API Key** value (starts with `pingram_sk_`) for `PINGRAM_API_KEY`.
+Do not use Client Id, Client Secret, or Public Key for server-side OTP sending.
+For production, verify your sender domain in Pingram before setting a custom `PINGRAM_SENDER_EMAIL`.
 
 ## Run locally
 ```bash
 npm install
 npm run dev
 ```
+
 Open `http://localhost:3000`.
 
 ## Run with Docker Compose
 ```bash
 docker compose up --build
 ```
-Open `http://localhost:3000`.
+
+Services:
+- app: `http://localhost:3000`
+- db: `localhost:5432`
+- redis: `localhost:6379`
+
+Health endpoint:
+- `GET /api/health`
 
 Stop containers:
 ```bash
 docker compose down
 ```
 
-
 ## Access control note
 - Admin navigation/menu appears only for users with `role=admin`.
-- Non-admin users are blocked from viewing admin dashboard page.
+- Non-admin users are blocked from viewing the admin dashboard page.

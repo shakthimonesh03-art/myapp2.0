@@ -1,0 +1,1 @@
+console.log("Notifications service is running");

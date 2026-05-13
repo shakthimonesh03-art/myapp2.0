@@ -2,66 +2,40 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { getActiveUser, isSessionExpired, logoutUser, markSessionActivity } from '@/lib/clientStore';
+import { getActiveUser } from '@/lib/clientStore';
 
 export default function NavBar() {
-  const router = useRouter();
-  const [role, setRole] = useState<string>('guest');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [role, setRole] = useState<string>('guest');
 
   useEffect(() => {
     const syncUser = () => {
       const user = getActiveUser();
-      setRole(user?.role || 'guest');
       setIsLoggedIn(Boolean(user));
+      setRole(user?.role || 'guest');
     };
-    syncUser();
-    const onActivity = () => {
-      if (getActiveUser()) markSessionActivity();
-    };
-    const events: (keyof WindowEventMap)[] = ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'];
-    events.forEach((event) => window.addEventListener(event, onActivity));
-    const expiryWatcher = window.setInterval(() => {
-      if (isSessionExpired() && getActiveUser()) {
-        logoutUser();
-        syncUser();
-        router.push('/auth');
-      }
-    }, 30_000);
-    return () => {
-      events.forEach((event) => window.removeEventListener(event, onActivity));
-      window.clearInterval(expiryWatcher);
-    };
-  }, [router]);
 
-  const onLogout = () => {
-    logoutUser();
-    setRole('guest');
-    setIsLoggedIn(false);
-    router.push('/auth');
-  };
+    syncUser();
+    const interval = setInterval(syncUser, 1000);
+    window.addEventListener('focus', syncUser);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', syncUser);
+    };
+  }, []);
 
   return (
     <header className="topbar">
       <div className="container nav-shell">
         <Link href="/" className="brand">
           TicketPulse
-          <span>Book Smarter, Not Harder</span>
         </Link>
         <nav className="navlinks">
-          <Link href="/">Events</Link>
-          {!isLoggedIn ? (
-            <Link href="/auth">Login</Link>
-          ) : (
-            <>
-              <Link href="/auth">Profile</Link>
-              <button className="btn ghost" onClick={onLogout}>Logout</button>
-              <Link href="/bookings">Bookings</Link>
-              <Link href="/notifications" aria-label="Notifications" title="Notifications">🔔</Link>
-              {role === 'admin' && <Link href="/admin">Admin Panel</Link>}
-            </>
-          )}
+          {role !== 'admin' && <Link href="/">Events</Link>}
+          {role !== 'admin' && <Link href="/bookings">Bookings</Link>}
+          <Link href="/auth">{isLoggedIn ? 'Account' : 'Login'}</Link>
+          {role === 'admin' && <Link href="/admin">Admin Dashboard</Link>}
         </nav>
       </div>
     </header>

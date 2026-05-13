@@ -1,78 +1,218 @@
 'use client';
+/* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { formatDateTime } from '@/lib/format';
+import { events } from '@/lib/mockData';
 import { getActiveUser } from '@/lib/clientStore';
 
-const HOLD_MINUTES = 5;
+type SeatView = {
+  id: string;
+  label: string;
+  status: 'AVAILABLE' | 'HELD' | 'BOOKED' | 'BLOCKED';
+  price: number;
+  ownedByRequester?: boolean;
+};
+type HoldSession = { holdToken: string; expiresAt: number };
 
 export default function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const [event, setEvent] = useState<{ id: string; title: string; city: string; startTime: string; venueId: string; description: string; basePrice?: number } | null>(null);
-  const [venueName, setVenueName] = useState('');
-  const [seats, setSeats] = useState<{ id: string; seatNumber?: string; status: string; price?: number; holdExpiry?: number }[]>([]);
+  const event = events.find((e) => e.id === id);
+  const [seats, setSeats] = useState<SeatView[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
-  const [error, setError] = useState('');
+  const [holdSession, setHoldSession] = useState<HoldSession | null>(null);
+  const [message, setMessage] = useState('');
+  const [loadingSeats, setLoadingSeats] = useState(true);
+  const [updatingHold, setUpdatingHold] = useState(false);
 
   useEffect(() => {
-    const load = async () => {
-      const [eventRes, venuesRes, seatsRes] = await Promise.all([fetch(`/api/events/${id}`), fetch('/api/venues'), fetch(`/api/inventory?eventId=${id}`)]);
-      const eventData = await eventRes.json();
-      const venuesData = await venuesRes.json();
-      const seatsData = await seatsRes.json();
-      const eventItem = eventData.event || null;
-      setEvent(eventItem);
-      setSeats(seatsData.seats ?? []);
-      setVenueName((venuesData.venues || []).find((v: { id: string }) => v.id === eventItem?.venueId)?.name || eventItem?.venueId || '');
-    };
-    load();
-    const timer = setInterval(load, 5000);
-    return () => clearInterval(timer);
-  }, [id]);
+    if (!id) return;
+    const holdKey = `hold:${id}`;
+    const user = getActiveUser();
 
-  const total = useMemo(() => {
-    if (!event) return 0;
-    const selectedSeats = seats.filter((seat) => selected.includes(seat.id));
-    if (!selectedSeats.length) return selected.length * (event.basePrice || 1200);
-    return selectedSeats.reduce((sum, seat) => sum + (seat.price ?? (event.basePrice || 1200)), 0);
-  }, [selected, seats, event]);
+    if (user) {
+      const raw = localStorage.getItem(holdKey);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as {
+            holdToken?: string;
+            userId?: string;
+            expiresAt?: number;
+            seats?: string[];
+          };
+          if (parsed.holdToken && parsed.userId === user.id && Number.isFinite(parsed.expiresAt)) {
+            setHoldSession({ holdToken: parsed.holdToken, expiresAt: Number(parsed.expiresAt) });
+            if (Array.isArray(parsed.seats)) {
+              setSelected(parsed.seats.map((seat) => String(seat).trim().toUpperCase()).filter(Boolean));
+            }
+          } else {
+            localStorage.removeItem(holdKey);
+          }
+        } catch {
+          localStorage.removeItem(holdKey);
+        }
+      }
+    }
+
+    let cancelled = false;
+    const loadSeats = async () => {
+      try {
+        const query = user?.id
+          ? `/api/inventory?eventId=${encodeURIComponent(id)}&userId=${encodeURIComponent(user.id)}`
+          : `/api/inventory?eventId=${encodeURIComponent(id)}`;
+        const response = await fetch(query);
+        const data = await response.json();
+        if (!cancelled && response.ok) {
+          const serverSeats = Array.isArray(data.seats) ? (data.seats as SeatView[]) : [];
+          setSeats(serverSeats);
+          if (user?.id) {
+            const heldByUser = serverSeats
+              .filter((seat) => seat.status === 'HELD' && seat.ownedByRequester)
+              .map((seat) => seat.id);
+            setSelected(heldByUser);
+            if (!heldByUser.length) {
+              setHoldSession(null);
+              localStorage.removeItem(holdKey);
+            }
+          } else {
+            setSelected([]);
+            setHoldSession(null);
+          }
+          setMessage('');
+        }
+      } catch {
+        if (!cancelled) setMessage('Unable to load seat status right now.');
+      } finally {
+        if (!cancelled) setLoadingSeats(false);
+      }
+    };
+
+    loadSeats();
+    const timer = setInterval(loadSeats, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [id]);
 
   if (!event) return <p>Event not found.</p>;
 
-  const toggleSeat = (seatId: string) => {
-    setSelected((prev) => prev.includes(seatId) ? prev.filter((s) => s !== seatId) : [...prev, seatId]);
-  };
+  const selectedSet = new Set(selected);
+  const total = seats.filter((seat) => selectedSet.has(seat.id)).reduce((sum, seat) => sum + seat.price, 0);
 
-  const holdSeats = async () => {
+  const toggleSeat = async (seatId: string) => {
+    if (updatingHold) return;
     const user = getActiveUser();
     if (!user) {
       router.push('/auth');
       return;
     }
+
+    const seat = seats.find((item) => item.id === seatId);
+    if (!seat) return;
+    const heldByRequester = seat.status === 'HELD' && seat.ownedByRequester;
+    const blockedForSelection = seat.status === 'BOOKED' || seat.status === 'BLOCKED' || (seat.status === 'HELD' && !heldByRequester);
+    if (blockedForSelection) return;
+
+    const nextSelected = selected.includes(seatId) ? selected.filter((s) => s !== seatId) : [...selected, seatId];
+    setUpdatingHold(true);
+    setMessage('');
+
+    try {
+      const response = await fetch('/api/inventory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'refresh-hold',
+          eventId: id,
+          userId: user.id,
+          holdToken: holdSession?.holdToken || '',
+          seatIds: nextSelected
+        })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        setMessage(data.error || 'Unable to update seat selection. Please try again.');
+        return;
+      }
+
+      const holdKey = `hold:${id}`;
+      if (!nextSelected.length) {
+        setSelected([]);
+        setHoldSession(null);
+        localStorage.removeItem(holdKey);
+        return;
+      }
+
+      const nextSeats = Array.isArray(data.seats) ? (data.seats as string[]) : nextSelected;
+      const normalizedSeats = nextSeats.map((value) => String(value).trim().toUpperCase()).filter(Boolean);
+      const expiresAt = Number(data.expiry);
+      const token = typeof data.holdToken === 'string' ? data.holdToken : holdSession?.holdToken;
+      if (!token || !Number.isFinite(expiresAt)) {
+        setMessage('Seat hold response was incomplete. Please try again.');
+        return;
+      }
+
+      const nextTotal = seats.filter((item) => normalizedSeats.includes(item.id)).reduce((sum, item) => sum + item.price, 0);
+      setSelected(normalizedSeats);
+      setHoldSession({ holdToken: token, expiresAt });
+      localStorage.setItem(
+        holdKey,
+        JSON.stringify({
+          eventId: id,
+          seats: normalizedSeats,
+          holdToken: token,
+          userId: user.id,
+          expiresAt,
+          amount: nextTotal
+        })
+      );
+    } finally {
+      setUpdatingHold(false);
+    }
+  };
+
+  const goToCheckout = () => {
     if (!selected.length) return;
-    setError('');
-    const response = await fetch('/api/inventory', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'hold', eventId: id, seatIds: selected, userId: user.id })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setError(data.error || 'Unable to hold seats.');
+    const user = getActiveUser();
+    if (!user) {
+      router.push('/auth');
       return;
     }
-    localStorage.setItem(`hold:${id}`, JSON.stringify({ seats: data.seats, expiresAt: data.expiry, amount: total, holdToken: data.holdToken, userId: user.id }));
+    if (!holdSession) {
+      setMessage('Hold not found for selected seats. Please select seats again.');
+      return;
+    }
+
+    const holdKey = `hold:${id}`;
+    localStorage.setItem(
+      holdKey,
+      JSON.stringify({
+        eventId: id,
+        seats: selected,
+        holdToken: holdSession.holdToken,
+        userId: user.id,
+        expiresAt: holdSession.expiresAt,
+        amount: total
+      })
+    );
     router.push(`/booking/${id}`);
   };
 
   return (
     <section className="stack-xl">
       <div className="panel hero-mini">
+        <div className="event-detail-image">
+          <img src={event.imageUrl} alt={`${event.title} banner`} referrerPolicy="no-referrer" />
+        </div>
         <h1>{event.title}</h1>
-        <p>{venueName} • {event.city} • {formatDateTime(event.startTime)}</p>
-        <p>{event.description}</p>
+        <p>
+          {event.venue} • {event.city} • {formatDateTime(event.datetime)}
+        </p>
+        <p>{event.venueLayout}</p>
       </div>
 
       <div className="panel">
@@ -80,29 +220,33 @@ export default function EventDetailPage() {
           <h3>Venue seat layout</h3>
           <p className="muted">Gray = unavailable • Blue = selected</p>
         </div>
-        <div className="seats">
-          {seats.map((seat) => {
-            const isSelected = selected.includes(seat.id);
-            const disabled = seat.status !== 'AVAILABLE';
-            return (
-              <button
-                key={seat.id}
-                className={`seat ${isSelected ? 'active' : ''}`}
-                disabled={disabled}
-                onClick={() => toggleSeat(seat.id)}
-              >
-                {seat.seatNumber || seat.id}
-              </button>
-            );
-          })}
-        </div>
-        {error && <p className="error-text">{error}</p>}
+        {loadingSeats ? (
+          <p>Loading seats...</p>
+        ) : (
+          <div className="seats">
+            {seats.map((seat) => {
+              const isSelected = selected.includes(seat.id);
+              const heldByRequester = seat.status === 'HELD' && seat.ownedByRequester;
+              const disabled = updatingHold || seat.status === 'BOOKED' || seat.status === 'BLOCKED' || (seat.status === 'HELD' && !heldByRequester);
+              return (
+                <button key={seat.id} className={`seat ${isSelected ? 'active' : ''}`} disabled={disabled} onClick={() => void toggleSeat(seat.id)}>
+                  {seat.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="panel row between center wrap">
-        <p>{selected.length} seats • ₹{total}</p>
-        <button className="btn" onClick={holdSeats}>Hold for {HOLD_MINUTES} min</button>
+        <p>
+          {selected.length} seats • ₹{total}
+        </p>
+        <button className="btn" onClick={goToCheckout} disabled={!selected.length || !holdSession || updatingHold}>
+          Submit
+        </button>
       </div>
+      {message && <p>{message}</p>}
     </section>
   );
 }
